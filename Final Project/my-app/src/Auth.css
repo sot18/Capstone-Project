@@ -1,0 +1,113 @@
+/* Center everything */
+.auth-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background: linear-gradient(to right, #667eea, #764ba2);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Card box */
+.auth-card {
+  background: #fff;
+  padding: 2.5rem;
+  border-radius: 16px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+  width: 350px;
+  text-align: center;
+}
+
+/* Title */
+.auth-title {
+  margin-bottom: 1.5rem;
+  color: #333;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+/* Input fields */
+.auth-input {
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  outline: none;
+  transition: border 0.2s ease;
+}
+
+.auth-input:focus {
+  border: 1px solid #667eea;
+}
+
+/* Button styles */
+.btn {
+  padding: 12px 18px;
+  border: none;
+  border-radius: 8px;
+  margin: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: 0.3s ease;
+  color: #fff;
+}
+
+.btn.login {
+  background: #667eea;
+}
+
+.btn.signup {
+  background: #764ba2;
+}
+
+.btn.logout {
+  background: #ff5252;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+/* Error message */
+.auth-error {
+  color: #ff5252;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+/* User info */
+.auth-user {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+/* Toggle buttons */
+.toggle-buttons {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  background: #eee;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: 0.3s ease;
+  border-radius: 8px 8px 0 0;
+}
+
+.toggle-btn.active {
+  background: #667eea;
+  color: #fff;
+  font-weight: 600;
+}
+
+.toggle-btn:not(.active):hover {
+  background: #ddd;
+}
