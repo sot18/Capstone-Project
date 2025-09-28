@@ -1,14 +1,17 @@
+// src/pages/Login.js
 import React, { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
-import { useNavigate, Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -16,19 +19,24 @@ export default function Login() {
     setBusy(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // On success, navigate to dashboard
-      navigate("/dashboard");
+      navigate("/dashboard"); // redirect to home/dashboard after login
     } catch (err) {
-      setError(err.message || "Failed to sign in");
+      setError(err.message || "Failed to login");
     } finally {
       setBusy(false);
     }
   };
 
+  if (user) {
+    // if already logged in, redirect to dashboard
+    navigate("/dashboard");
+    return null;
+  }
+
   return (
     <div className="max-w-md mx-auto mt-12">
-      <div className="container-card">
-        <h2 className="text-2xl font-bold mb-4">Login</h2>
+      <div className="p-6 shadow-md rounded-lg bg-white">
+        <h2 className="text-2xl font-bold mb-4">Log in</h2>
         <form onSubmit={handleLogin} className="space-y-4">
           <label className="block">
             <span className="text-sm text-gray-600">Email</span>
@@ -56,15 +64,18 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={busy}
+            disabled={!email || !password || busy}
             className="w-full bg-blue-600 text-white py-2 rounded disabled:opacity-60"
           >
-            {busy ? "Signing in..." : "Login"}
+            {busy ? "Logging in..." : "Log in"}
           </button>
         </form>
 
         <div className="mt-4 text-sm text-gray-600">
-          Don’t have an account? <Link to="/signup" className="text-blue-600 hover:underline">Sign up</Link>
+          Don't have an account?{" "}
+          <Link to="/signup" className="text-green-600 hover:underline">
+            Sign up
+          </Link>
         </div>
       </div>
     </div>

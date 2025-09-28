@@ -16,7 +16,9 @@ const UploadNotes = () => {
 
   // Monitor auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -27,19 +29,24 @@ const UploadNotes = () => {
 
   const handleUpload = async () => {
     if (!file || !user) {
-      setMessage({ type: "error", text: "Select a file and make sure you're logged in." });
+      setMessage({
+        type: "error",
+        text: "Select a file and make sure you're logged in.",
+      });
       return;
     }
 
     setUploading(true);
 
     try {
+      // Upload file to Storage
       const storageRef = ref(storage, `notes/${user.uid}/${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
+      // Save file metadata to Firestore
       await addDoc(collection(db, "notes"), {
-        uid: user.uid,
+        userId: user.uid, // 🔹 Must match Firestore rules
         fileName: file.name,
         fileUrl: url,
         createdAt: serverTimestamp(),
@@ -62,17 +69,16 @@ const UploadNotes = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl bg-white rounded-2xl shadow-lg p-8">
-        <h1 className="text-3xl font-bold text-center mb-6 text-gray-800">
-          Upload Your Notes
-        </h1>
-
-        <p className="text-center text-gray-500 mb-6">
+    <div className="space-y-6">
+      <div className="container-card">
+        <h1 className="text-3xl font-bold mb-2">Upload Notes</h1>
+        <p className="text-gray-600">
           Supported formats: <span className="font-semibold">.pdf</span>,{" "}
           <span className="font-semibold">.txt</span>
         </p>
+      </div>
 
+      <div className="container-card">
         <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 mb-4 hover:border-blue-400 transition-colors duration-200">
           <input
             type="file"
@@ -91,8 +97,8 @@ const UploadNotes = () => {
 
         <button
           onClick={handleUpload}
-          disabled={!file || uploading}
-          className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors duration-200"
+          disabled={!file || !user || uploading} // Disabled until user is loaded
+          className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           {uploading ? "Uploading..." : "Upload"}
         </button>
