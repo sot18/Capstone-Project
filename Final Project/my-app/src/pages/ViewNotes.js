@@ -37,7 +37,6 @@ const ViewNotes = () => {
     try {
       const notesRef = collection(db, "notes");
 
-      // Use 'userId' to match Firestore rules
       const q = query(
         notesRef,
         where("userId", "==", uid),
@@ -45,7 +44,10 @@ const ViewNotes = () => {
       );
 
       const snapshot = await getDocs(q);
-      const list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const list = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
       setNotes(list);
     } catch (err) {
       console.error("Error fetching notes:", err);
@@ -58,7 +60,7 @@ const ViewNotes = () => {
   const handleDelete = async (note) => {
     try {
       // Delete file from Storage
-      if (note.fileUrl) {
+      if (note.fileUrl && user) {
         const fileRef = ref(storage, `notes/${user.uid}/${note.fileName}`);
         await deleteObject(fileRef).catch(() => {});
       }
@@ -103,14 +105,16 @@ const ViewNotes = () => {
                 </p>
               </div>
               <div className="mt-4 flex gap-3">
-                <a
-                  href={note.fileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-1 text-center py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
-                >
-                  View
-                </a>
+                {note.fileUrl && (
+                  <a
+                    href={note.fileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 text-center py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                  >
+                    View
+                  </a>
+                )}
                 <button
                   onClick={() => handleDelete(note)}
                   className="flex-1 py-2 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors"

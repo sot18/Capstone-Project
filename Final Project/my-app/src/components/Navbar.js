@@ -1,9 +1,10 @@
 // src/components/Navbar.js
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+//import { useAuth } from "../AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
+import { useAuth } from "../context/AuthContext";
 
 export default function Navbar() {
   const { user } = useAuth();
@@ -21,6 +22,7 @@ export default function Navbar() {
   return (
     <nav className="bg-white border-b">
       <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center text-xl font-bold">
             📘
@@ -28,6 +30,7 @@ export default function Navbar() {
           <span className="text-xl font-semibold">StudyBuddy</span>
         </div>
 
+        {/* Navigation Links */}
         <div className="flex items-center gap-6 text-sm text-gray-700">
           <Link to="/dashboard" className="hover:underline">
             Home
@@ -38,6 +41,16 @@ export default function Navbar() {
           <Link to="/upload" className="hover:underline">
             Upload
           </Link>
+
+          {/* Chat with AI link styled like other links */}
+          {user && (
+            <span
+              onClick={() => navigate("/chat")}
+              className="hover:underline cursor-pointer"
+            >
+              Chat with AI
+            </span>
+          )}
 
           {user ? (
             <>

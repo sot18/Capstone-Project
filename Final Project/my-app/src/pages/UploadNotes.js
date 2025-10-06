@@ -1,4 +1,3 @@
-// src/components/UploadNotes.js
 import React, { useState, useEffect } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -14,7 +13,6 @@ const UploadNotes = () => {
   const storage = getStorage();
   const db = getFirestore();
 
-  // Monitor auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -23,7 +21,23 @@ const UploadNotes = () => {
   }, []);
 
   const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
+    const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
+
+    const allowedTypes = ["application/pdf", "text/plain"];
+    if (!allowedTypes.includes(selectedFile.type)) {
+      setMessage({ type: "error", text: "Unsupported file type" });
+      setFile(null);
+      return;
+    }
+
+    if (selectedFile.size > 10 * 1024 * 1024) {
+      setMessage({ type: "error", text: "File is too large" });
+      setFile(null);
+      return;
+    }
+
+    setFile(selectedFile);
     setMessage({ type: "", text: "" });
   };
 
@@ -39,14 +53,12 @@ const UploadNotes = () => {
     setUploading(true);
 
     try {
-      // Upload file to Storage
       const storageRef = ref(storage, `notes/${user.uid}/${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
-      // Save file metadata to Firestore
       await addDoc(collection(db, "notes"), {
-        userId: user.uid, // 🔹 Must match Firestore rules
+        userId: user.uid,
         fileName: file.name,
         fileUrl: url,
         createdAt: serverTimestamp(),
@@ -97,7 +109,7 @@ const UploadNotes = () => {
 
         <button
           onClick={handleUpload}
-          disabled={!file || !user || uploading} // Disabled until user is loaded
+          disabled={!file || !user || uploading}
           className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           {uploading ? "Uploading..." : "Upload"}

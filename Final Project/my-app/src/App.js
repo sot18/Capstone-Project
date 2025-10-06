@@ -6,6 +6,7 @@ import Signup from "./pages/Signup";
 import UploadNotes from "./pages/UploadNotes";
 import ViewNotes from "./pages/ViewNotes";
 import Profile from "./pages/Profile";
+import Chatbox from "./pages/Chatbox"; // ✅ import ChatBox
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
 
@@ -19,13 +20,56 @@ export default function App() {
       <Navbar />
       <main className="p-6 max-w-6xl mx-auto">
         <Routes>
-          <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
+          <Route
+            path="/"
+            element={user ? <Navigate to="/dashboard" /> : <Navigate to="/login" />}
+          />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/upload" element={<ProtectedRoute><UploadNotes /></ProtectedRoute>} />
-          <Route path="/notes" element={<ProtectedRoute><ViewNotes /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+
+          {/* ✅ Protected routes */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              <ProtectedRoute>
+                <UploadNotes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/notes"
+            element={
+              <ProtectedRoute>
+                <ViewNotes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ✅ New Chat route (protected, same style) */}
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <Chatbox />
+              </ProtectedRoute>
+            }
+          />
         </Routes>
       </main>
     </Router>
