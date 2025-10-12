@@ -1,99 +1,186 @@
+# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import uuid
-import firebase_admin
-from firebase_admin import credentials, storage
 import os
 from dotenv import load_dotenv
+import uuid
+import tempfile
+import requests
 from openai import OpenAI
+from pdf2image import convert_from_bytes
+import pytesseract
 
-# -------------------------------
-# 🔐 Load Environment Variables
-# -------------------------------
-load_dotenv()  # loads variables from .env file
+# Firebase admin
+import firebase_admin
+from firebase_admin import credentials, storage, firestore
 
-# -------------------------------
-# 🔥 Firebase Initialization
-# -------------------------------
-cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred, {
-    "storageBucket": "final-project-6b77f.firebasestorage.app"  # match React firebase.js
-})
-bucket = storage.bucket()
+# Load environment variables
+load_dotenv()
 
-# -------------------------------
-# ⚙️ Flask Setup
-# -------------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise EnvironmentError("Please set OPENAI_API_KEY in environment or .env")
+
+# Init OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Initialize Flask
 app = Flask(__name__)
-# ✅ Enable CORS specifically for React frontend
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app)
 
-# -------------------------------
-# ☁️ File Upload Endpoint
-# -------------------------------
+# -------------------------
+# Firebase init (admin SDK)
+# -------------------------
+if not firebase_admin._apps:
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred, {
+        "storageBucket": "final-project-6b77f.appspot.com"
+    })
+
+bucket = storage.bucket()
+db = firestore.client()
+
+# =======================
+# Upload endpoint
+# =======================
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
     file = request.files["file"]
-    file_name = file.filename
+    user_id = request.form.get("userId") or "unknown_user"
+    filename = file.filename
     unique_id = str(uuid.uuid4())
-    blob_name = f"notes/{unique_id}/{file_name}"
+    blob_name = f"notes/{user_id}/{unique_id}/{filename}"
 
     try:
         blob = bucket.blob(blob_name)
         blob.upload_from_file(file, content_type=file.content_type)
         blob.make_public()
-        return jsonify({"url": blob.public_url, "fileName": blob_name}), 200
+        file_url = blob.public_url
+
+        doc_ref = db.collection("notes").add({
+            "userId": user_id,
+            "fileName": filename,
+            "fileUrl": file_url,
+            "storagePath": blob_name,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+
+        return jsonify({"url": file_url, "fileName": filename, "id": doc_ref[1].id}), 200
     except Exception as e:
+        print("Upload error:", e)
         return jsonify({"error": str(e)}), 500
 
-# -------------------------------
-# 🤖 AI Chatbot Endpoint
-# -------------------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise EnvironmentError(
-        "❌ Please set your OPENAI_API_KEY in a .env file or environment variable."
-    )
+# =======================
+# Get notes for a user
+# =======================
+@app.route("/api/notes", methods=["GET"])
+def get_notes():
+    uid = request.args.get("uid")
+    try:
+        if not uid:
+            return jsonify([])
+        notes_ref = db.collection("notes")
+        query = notes_ref.where("userId", "==", uid).order_by("createdAt", direction=firestore.Query.DESCENDING)
+        docs = query.stream()
+        result = []
+        for d in docs:
+            data = d.to_dict()
+            result.append({
+                "id": d.id,
+                "name": data.get("fileName"),
+                "url": data.get("fileUrl"),
+                "storagePath": data.get("storagePath"),
+                "createdAt": data.get("createdAt").isoformat() if data.get("createdAt") else None
+            })
+        return jsonify(result)
+    except Exception as e:
+        print("Get notes error:", e)
+        return jsonify({"error": "Failed to fetch notes"}), 500
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# =======================
+# Delete note
+# =======================
+@app.route("/api/delete-note", methods=["POST"])
+def delete_note():
+    data = request.get_json()
+    doc_id = data.get("id")
+    storage_path = data.get("storagePath")
+    try:
+        if storage_path:
+            blob = bucket.blob(storage_path)
+            blob.delete()
+        if doc_id:
+            db.collection("notes").document(doc_id).delete()
+        return jsonify({"ok": True})
+    except Exception as e:
+        print("Delete note error:", e)
+        return jsonify({"error": str(e)}), 500
 
+# =======================
+# Chat endpoint with OCR
+# =======================
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """Chatbot endpoint — receives user message, returns AI response"""
+    data = request.get_json() or {}
+    user_message = data.get("message")
+    note_url = data.get("note_url")
+
+    if not user_message or not note_url:
+        return jsonify({"reply": "Please select a note and enter a question."}), 400
+
     try:
-        data = request.get_json()
-        user_message = data.get("message", "")
+        # Download PDF from Firebase
+        resp = requests.get(note_url, timeout=20)
+        resp.raise_for_status()
 
-        if not user_message:
-            return jsonify({"error": "No message provided"}), 400
+        # Convert PDF pages to images
+        images = convert_from_bytes(resp.content)
 
-        response = client.chat.completions.create(
-         model="gpt-3.5-turbo",
-         messages=[
-        {
-            "role": "system",
-            "content": (
-                "You are StudyBuddy, an AI tutor that helps students learn from their notes. "
-                "Answer clearly, explain simply, and encourage good study habits."
-            ),
-        },
-        {"role": "user", "content": user_message},
-    ],
-    temperature=0.7,
-)
+        # OCR each page
+        text_content = ""
+        for img in images:
+            text_content += pytesseract.image_to_string(img)
 
-        reply = response.choices[0].message.content.strip()
-        return jsonify({"reply": reply}), 200
+        if not text_content.strip():
+            return jsonify({"reply": "No readable text found in this note."}), 200
+
+        # Limit context size
+        context = text_content[:15000]
+
+        # AI prompt
+        prompt = f"""
+You are StudyBuddy AI. Answer the user’s question using ONLY the content of the note below.
+Do NOT invent information.
+
+--- NOTE START ---
+{context}
+--- NOTE END ---
+
+Question: {user_message}
+Answer in a clear and concise sentence.
+"""
+
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful study assistant that answers only from the note."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+
+        reply = completion.choices[0].message.content.strip()
+        return jsonify({"reply": reply})
 
     except Exception as e:
         print("Chatbot error:", e)
-        return jsonify({"error": "Failed to get response from AI."}), 500
+        return jsonify({"reply": "Error processing note or AI response."}), 500
 
-# -------------------------------
-# 🚀 Run the App
-# -------------------------------
+# =======================
+# Run
+# =======================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
