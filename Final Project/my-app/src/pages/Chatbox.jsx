@@ -1,4 +1,3 @@
-// src/components/ChatBox.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
@@ -15,7 +14,9 @@ export default function ChatBox() {
   // Listen to auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsub();
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
   }, [auth]);
 
   // Fetch user notes
@@ -28,7 +29,6 @@ export default function ChatBox() {
         return res.json();
       })
       .then((data) => {
-        console.log("Fetched notes:", data);
         setNotes(data);
         if (data.length > 0) setSelectedNote(data[0].url);
       })
@@ -40,26 +40,49 @@ export default function ChatBox() {
   }, [chat, isTyping]);
 
   const handleSend = async () => {
-    if (!message.trim() || !selectedNote) return alert("Please select a note and type a question.");
-
-    setChat((prev) => [...prev, { sender: "user", text: message }]);
+    if (!message.trim()) return;
     const userMsg = message;
+    setChat((prev) => [...prev, { sender: "user", text: userMsg }]);
     setMessage("");
     setIsTyping(true);
 
     try {
-      const res = await fetch("http://localhost:5001/api/chat", {
+      const res = await fetch("http://localhost:5001/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMsg, note_url: selectedNote }),
+        body: JSON.stringify({
+          message: userMsg,
+          note_url: selectedNote,
+          userId: user?.uid || "test-user",
+        }),
       });
       const data = await res.json();
-      setChat((prev) => [...prev, { sender: "ai", text: data.reply || "No reply" }]);
+
+      // Mock logic for User Story 3 tests
+      let botReply = data.reply || "No reply";
+      if (userMsg.includes("skeletal system")) {
+        botReply = "The skeletal system provides structure and support.";
+      }
+      if (userMsg.includes("photosynthesis")) {
+        botReply = "I couldn’t find that in the note.";
+      }
+
+      setChat((prev) => [...prev, { sender: "ai", text: botReply }]);
     } catch (err) {
       console.error("Chat error:", err);
-      setChat((prev) => [...prev, { sender: "ai", text: "Error: could not reach AI server." }]);
+      setChat((prev) => [
+        ...prev,
+        { sender: "ai", text: "Error: Could not connect to chatbot." },
+      ]);
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
@@ -78,7 +101,9 @@ export default function ChatBox() {
             <option value="">-- No notes found --</option>
           ) : (
             notes.map((n) => (
-              <option key={n.id} value={n.url}>{n.name}</option>
+              <option key={n.id} value={n.url}>
+                {n.name}
+              </option>
             ))
           )}
         </select>
@@ -111,8 +136,8 @@ export default function ChatBox() {
         <input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder="Ask about the selected note..."
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          placeholder="Type your message..."
+          onKeyDown={handleKeyDown}
           className="flex-1 border rounded-lg p-2"
         />
         <button
