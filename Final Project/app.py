@@ -1,48 +1,33 @@
-# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import os
+import os, uuid, requests
 from dotenv import load_dotenv
-import uuid
-import tempfile
-import requests
 from openai import OpenAI
 from pdf2image import convert_from_bytes
 import pytesseract
-
-# Firebase admin
 import firebase_admin
-from firebase_admin import credentials, storage, firestore
+from firebase_admin import credentials, firestore, storage
 
-# Load environment variables
 load_dotenv()
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise EnvironmentError("Please set OPENAI_API_KEY in environment or .env")
 
-# Init OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Initialize Flask
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# -------------------------
-# Firebase init (admin SDK)
-# -------------------------
+# Firebase init
 if not firebase_admin._apps:
     cred = credentials.Certificate("serviceAccountKey.json")
     firebase_admin.initialize_app(cred, {
         "storageBucket": "final-project-6b77f.appspot.com"
     })
-
-bucket = storage.bucket()
 db = firestore.client()
+bucket = storage.bucket()
 
-# =======================
-# Upload endpoint
-# =======================
+# ---------------- Upload notes ----------------
 @app.route("/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:
@@ -73,9 +58,7 @@ def upload_file():
         print("Upload error:", e)
         return jsonify({"error": str(e)}), 500
 
-# =======================
-# Get notes for a user
-# =======================
+# ---------------- Get notes ----------------
 @app.route("/api/notes", methods=["GET"])
 def get_notes():
     uid = request.args.get("uid")
@@ -100,57 +83,28 @@ def get_notes():
         print("Get notes error:", e)
         return jsonify({"error": "Failed to fetch notes"}), 500
 
-# =======================
-# Delete note
-# =======================
-@app.route("/api/delete-note", methods=["POST"])
-def delete_note():
-    data = request.get_json()
-    doc_id = data.get("id")
-    storage_path = data.get("storagePath")
-    try:
-        if storage_path:
-            blob = bucket.blob(storage_path)
-            blob.delete()
-        if doc_id:
-            db.collection("notes").document(doc_id).delete()
-        return jsonify({"ok": True})
-    except Exception as e:
-        print("Delete note error:", e)
-        return jsonify({"error": str(e)}), 500
-
-# =======================
-# Chat endpoint with OCR
-# =======================
+# ---------------- Chat endpoint ----------------
 @app.route("/api/chat", methods=["POST"])
 def chat():
     data = request.get_json() or {}
     user_message = data.get("message")
     note_url = data.get("note_url")
+    user_id = data.get("userId", "guest")
+    session_id = data.get("sessionId") or str(uuid.uuid4())
+    conversation_name = data.get("conversationName") or "New Conversation"
 
     if not user_message or not note_url:
-        return jsonify({"reply": "Please select a note and enter a question."}), 400
+        return jsonify({"reply": "Please select a note and enter a question.", "sessionId": session_id}), 400
 
     try:
-        # Download PDF from Firebase
         resp = requests.get(note_url, timeout=20)
         resp.raise_for_status()
-
-        # Convert PDF pages to images
         images = convert_from_bytes(resp.content)
-
-        # OCR each page
         text_content = ""
         for img in images:
             text_content += pytesseract.image_to_string(img)
-
-        if not text_content.strip():
-            return jsonify({"reply": "No readable text found in this note."}), 200
-
-        # Limit context size
         context = text_content[:15000]
 
-        # AI prompt
         prompt = f"""
 You are StudyBuddy AI. Answer the user’s question using ONLY the content of the note below.
 Do NOT invent information.
@@ -162,7 +116,6 @@ Do NOT invent information.
 Question: {user_message}
 Answer in a clear and concise sentence.
 """
-
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -173,14 +126,71 @@ Answer in a clear and concise sentence.
         )
 
         reply = completion.choices[0].message.content.strip()
-        return jsonify({"reply": reply})
 
+        db.collection("conversations").add({
+            "user_id": user_id,
+            "session_id": session_id,
+            "note_url": note_url,
+            "message": user_message,
+            "reply": reply,
+            "conversation_name": conversation_name,
+            "createdAt": firestore.SERVER_TIMESTAMP
+        })
+
+        return jsonify({"reply": reply, "sessionId": session_id}), 200
     except Exception as e:
         print("Chatbot error:", e)
-        return jsonify({"reply": "Error processing note or AI response."}), 500
+        return jsonify({"reply": "Error processing note or AI response.", "sessionId": session_id}), 500
 
-# =======================
-# Run
-# =======================
+# ---------------- Get sessions ----------------
+@app.route("/api/sessions", methods=["GET"])
+def get_sessions():
+    uid = request.args.get("uid")
+    if not uid:
+        return jsonify([])
+
+    try:
+        conv_ref = db.collection("conversations").where("user_id", "==", uid)
+        docs = conv_ref.stream()
+        sessions = {}
+
+        for d in docs:
+            data = d.to_dict()
+            sid = data.get("session_id")
+            if sid not in sessions:
+                sessions[sid] = {
+                    "sessionId": sid,
+                    "note_url": data.get("note_url"),
+                    "createdAt": data.get("createdAt"),
+                    "messages": [],
+                    "name": data.get("conversation_name") or "New Conversation"
+                }
+
+            sessions[sid]["messages"].append({
+                "message": data.get("message"),
+                "reply": data.get("reply"),
+                "createdAt": data.get("createdAt")
+            })
+
+        sessions_list = []
+
+        for s in sessions.values():
+            # Ensure messages array is always sorted
+            s["messages"].sort(key=lambda x: x["createdAt"])
+            # Ensure name is always present
+            if not s.get("name"):
+                s["name"] = "New Conversation"
+            sessions_list.append(s)
+
+        # Sort sessions by latest message timestamp
+        sessions_list.sort(key=lambda x: x["messages"][-1]["createdAt"] if x["messages"] else x["createdAt"], reverse=True)
+
+        return jsonify(sessions_list)
+    except Exception as e:
+        print("Session fetch error:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------------- Run ----------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

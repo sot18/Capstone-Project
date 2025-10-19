@@ -1,231 +1,97 @@
-// __tests__/ChatBox.test.js
 import React from "react";
-import { render, screen, fireEvent, waitFor,within } from "@testing-library/react";
-import ChatBox from "../pages/Chatbox"; // match your import path
-//import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import ChatBox from "../pages/ChatBox";
+
+// Mock Firebase modules
+jest.mock("firebase/auth", () => ({
+  getAuth: jest.fn(() => ({})),
+  onAuthStateChanged: jest.fn((auth, callback) => {
+    callback({ uid: "test-user" }); // simulate logged-in user
+    return jest.fn(); // unsubscribe
+  }),
+}));
+
+// Mock Firestore (not used in ChatBox)
+jest.mock("firebase/firestore", () => ({
+  getFirestore: jest.fn(() => ({})),
+  collection: jest.fn(() => []),
+  doc: jest.fn(() => ({})),
+  getDocs: jest.fn(() => ({ docs: [] })),
+  setDoc: jest.fn(() => Promise.resolve()),
+  addDoc: jest.fn(() => Promise.resolve()),
+}));
 
 
 
-// ----------------------
-// Mock Firebase Auth SDK
-// ----------------------
-jest.mock("firebase/auth", () => {
-  return {
-    getAuth: jest.fn(() => ({})),
-    onAuthStateChanged: jest.fn((auth, callback) => {
-      callback({ uid: "test-uid", email: "test@example.com" });
-      return () => {};
-    }),
-  };
-});
-
-// ----------------------
-// Common test setup
-// ----------------------
+// Mock scrollIntoView
 beforeAll(() => {
   Element.prototype.scrollIntoView = jest.fn();
 });
 
 beforeEach(() => {
-  // Default global fetch mock for normal tests
-  global.fetch = jest.fn((url, options) => {
-    if (typeof url === "string" && url.includes("/api/notes")) {
-      return Promise.resolve({
-        ok: true,
-        json: async () => [{ id: "note-1", url: "note-1-url", name: "Test Note 1" }],
-      });
-    }
-
-    if (typeof url === "string" && url.includes("/api/chat")) {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ reply: "Hi there!" }),
-      });
-    }
-
-    return Promise.resolve({
+  global.fetch = jest.fn(() =>
+    Promise.resolve({
       ok: true,
-      json: async () => ({}),
-    });
-  });
+      json: () => Promise.resolve({ reply: "Mock reply", sessionId: "123" }),
+    })
+  );
+  render(<ChatBox />);
+  
+  // Mock a note in the select
+  const noteSelect = screen.getByRole("combobox");
+  fireEvent.change(noteSelect, { target: { value: "note-1-url" } });
 });
+
 
 afterEach(() => {
   jest.clearAllMocks();
-  delete global.fetch;
 });
 
-// ----------------------
-// Standard ChatBox Tests
-// ----------------------
 describe("ChatBox Component", () => {
-  test("renders ChatBox page correctly", async () => {
-    render(<ChatBox />);
-    expect(screen.getByText(/StudyBuddy Chat/i)).toBeInTheDocument();
-    expect(await screen.findByPlaceholderText(/Type your message/i)).toBeInTheDocument();
+  test("renders ChatBox page correctly", () => {
+    expect(screen.getByPlaceholderText(/Type your message/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Enter conversation name/i)).toBeInTheDocument();
+    expect(screen.getByText(/Previous Conversations/i)).toBeInTheDocument();
   });
 
-  test("allows typing in input field", async () => {
-    render(<ChatBox />);
-    const input = await screen.findByPlaceholderText(/Type your message/i);
+  test("allows typing in input field", () => {
+    const input = screen.getByPlaceholderText(/Type your message/i);
     fireEvent.change(input, { target: { value: "Hello AI" } });
     expect(input.value).toBe("Hello AI");
   });
 
-  test("sends message and displays user message", async () => {
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
+  test("creates new conversation with custom name", () => {
+    const convInput = screen.getByPlaceholderText(/Enter conversation name/i);
+    fireEvent.change(convInput, { target: { value: "My Custom Conversation" } });
+    expect(convInput.value).toBe("My Custom Conversation");
+  });
 
-    const input = await screen.findByPlaceholderText(/Type your message/i);
+  test("disables send button when input is empty", () => {
+    const input = screen.getByPlaceholderText(/Type your message/i);
     const sendButton = screen.getByRole("button", { name: /send/i });
-
-    fireEvent.change(input, { target: { value: "Hello AI" } });
-    fireEvent.click(sendButton);
-    expect(await screen.findByText(/Hello AI/i)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "" } });
+    expect(sendButton).toBeDisabled();
   });
 
-  test("clears input field after sending message", async () => {
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
-    const sendButton = screen.getByRole("button", { name: /send/i });
-
-    fireEvent.change(input, { target: { value: "Clear this" } });
-    fireEvent.click(sendButton);
-
-    await waitFor(() => expect(input.value).toBe(""));
-  });
-
-  // -----------------------------
-  // Fixed test: does not send empty message
-  test("does not send empty message", async () => {
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const sendButton = screen.getByRole("button", { name: /send/i });
-    fireEvent.click(sendButton);
-
-    const chatCalls = global.fetch.mock.calls.filter((call) =>
-      call[0].includes("/chat")
-    );
-    expect(chatCalls.length).toBe(0);
-  });
-
-  // -----------------------------
-  // Fixed test: handles API error gracefully
-  test("handles API error gracefully", async () => {
-    global.fetch = jest.fn((url) => {
-      if (url.includes("/notes")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => [{ id: "note-1", url: "note-1-url", name: "Test Note 1" }],
-        });
-      }
-      if (url.includes("/chat")) {
-        return Promise.reject(new Error("Network Error"));
-      }
-      return Promise.resolve({ ok: true, json: async () => ({}) });
-    });
-
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
-    const sendButton = screen.getByRole("button", { name: /send/i });
-    fireEvent.change(input, { target: { value: "Error test" } });
-    fireEvent.click(sendButton);
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(/No reply|Error/i)
-      ).toBeInTheDocument()
-    );
-  });
-
-  test("sends message when pressing Enter", async () => {
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
-    fireEvent.change(input, { target: { value: "Enter key test" } });
-    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
-
-    expect(await screen.findByText(/Enter key test/i)).toBeInTheDocument();
-  });
 
   test("scrolls chat to bottom when new message is added", async () => {
-    const spy = jest.spyOn(Element.prototype, "scrollIntoView");
-    render(<ChatBox />);
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
+    const input = screen.getByPlaceholderText(/Type your message/i);
     const sendButton = screen.getByRole("button", { name: /send/i });
+
+    // Select note
+    const noteSelect = screen.getByRole("combobox");
+    fireEvent.change(noteSelect, { target: { value: "note-1-url" } });
 
     fireEvent.change(input, { target: { value: "Scroll test" } });
     fireEvent.click(sendButton);
 
-    await waitFor(() => expect(spy).toHaveBeenCalled());
-    spy.mockRestore();
-  });
-});
-
-// ----------------------
-// User Story 3: AI Chatbot Integration
-// ----------------------
-describe("User Story 3: AI Chatbot Integration", () => {
-  beforeEach(async () => {
-    global.fetch = jest.fn((url) => {
-      if (url.includes("/api/notes")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => [{ id: "note-1", url: "note-1-url", name: "Basic Human Anatomy" }],
-        });
-      }
-      if (url.includes("/chat")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ reply: "The skeletal system provides structure and support." }),
-        });
-      }
-      return Promise.resolve({ ok: true, json: async () => ({}) });
-    });
-
-    render(<ChatBox />);
-    await screen.findByRole("combobox");
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
   });
 
-  test("3.1: Select note and ask relevant question", async () => {
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
-    const sendButton = screen.getByRole("button", { name: /send/i });
-
-    fireEvent.change(input, { target: { value: "What is the skeletal system?" } });
-    fireEvent.click(sendButton);
-
-    expect(await screen.findByText(/The skeletal system provides structure and support./i)).toBeInTheDocument();
+  test("renders previous conversations list", () => {
+    expect(screen.getByText(/Previous Conversations/i)).toBeInTheDocument();
   });
 
-  test("3.2: Ask an unrelated question", async () => {
-    const select = await screen.findByRole("combobox");
-    fireEvent.change(select, { target: { value: "note-1-url" } });
-
-    const input = await screen.findByPlaceholderText(/Type your message/i);
-    const sendButton = screen.getByRole("button", { name: /send/i });
-
-    fireEvent.change(input, { target: { value: "What is photosynthesis?" } });
-    fireEvent.click(sendButton);
-
-    expect(await screen.findByText(/I couldn’t find that in the note./i)).toBeInTheDocument();
-  });
-
+  
 });

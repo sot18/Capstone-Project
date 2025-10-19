@@ -7,73 +7,93 @@ export default function ChatBox() {
   const [selectedNote, setSelectedNote] = useState("");
   const [message, setMessage] = useState("");
   const [chat, setChat] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [conversationName, setConversationName] = useState("New Conversation");
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
   const auth = getAuth();
 
-  // Listen to auth
+  // Auth listener
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => {
-      if (typeof unsub === "function") unsub();
-    };
+    const unsub = onAuthStateChanged(auth, setUser);
+    return unsub;
   }, [auth]);
 
-  // Fetch user notes
+  // Load notes
   useEffect(() => {
     if (!user) return;
-    const uid = user.uid;
-    fetch(`http://localhost:5001/api/notes?uid=${encodeURIComponent(uid)}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(await res.text());
-        return res.json();
-      })
-      .then((data) => {
+    fetch(`http://localhost:5001/api/notes?uid=${user.uid}`)
+      .then(res => res.json())
+      .then(data => {
         setNotes(data);
         if (data.length > 0) setSelectedNote(data[0].url);
       })
-      .catch((err) => console.error("Error loading notes:", err));
+      .catch(err => console.error(err));
   }, [user]);
 
+  // Load sessions
+  const fetchSessions = () => {
+    if (!user) return;
+    fetch(`http://localhost:5001/api/sessions?uid=${user.uid}`)
+      .then(res => res.json())
+      .then(data => setSessions(Array.isArray(data) ? data : []))
+      .catch(err => console.error("Error loading sessions:", err));
+  };
+
+  useEffect(() => {
+    fetchSessions();
+  }, [user]);
+
+  // Scroll to bottom when chat updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat, isTyping]);
 
+  const startNewConversation = () => {
+    setChat([]);
+    setCurrentSessionId(null);
+    setConversationName("New Conversation");
+  };
+
+  const loadSession = (session) => {
+    const formatted = session.messages
+      .map(m => [{ sender: "user", text: m.message }, { sender: "ai", text: m.reply }])
+      .flat();
+    setChat(formatted);
+    setCurrentSessionId(session.sessionId);
+    setConversationName(session.name || session.summary || "Conversation");
+    if (session.note_url) setSelectedNote(session.note_url);
+  };
+
+  // ✅ Send message
   const handleSend = async () => {
-    if (!message.trim()) return;
-    const userMsg = message;
-    setChat((prev) => [...prev, { sender: "user", text: userMsg }]);
-    setMessage("");
+    if (!message.trim() || !selectedNote) return;
+
+    const userMsg = message.trim();
+    setChat(prev => [...prev, { sender: "user", text: userMsg }]);
+    setMessage(""); // Clear input immediately
     setIsTyping(true);
 
     try {
-      const res = await fetch("http://localhost:5001/chat", {
+      const res = await fetch("http://localhost:5001/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: userMsg,
           note_url: selectedNote,
-          userId: user?.uid || "test-user",
+          userId: user?.uid,
+          sessionId: currentSessionId,
+          conversationName
         }),
       });
       const data = await res.json();
-
-      // Mock logic for User Story 3 tests
-      let botReply = data.reply || "No reply";
-      if (userMsg.includes("skeletal system")) {
-        botReply = "The skeletal system provides structure and support.";
-      }
-      if (userMsg.includes("photosynthesis")) {
-        botReply = "I couldn’t find that in the note.";
-      }
-
-      setChat((prev) => [...prev, { sender: "ai", text: botReply }]);
+      setChat(prev => [...prev, { sender: "ai", text: data.reply }]);
+      setCurrentSessionId(data.sessionId);
+      fetchSessions();
     } catch (err) {
       console.error("Chat error:", err);
-      setChat((prev) => [
-        ...prev,
-        { sender: "ai", text: "Error: Could not connect to chatbot." },
-      ]);
+      setChat(prev => [...prev, { sender: "ai", text: "Error: Could not connect to chatbot." }]);
     } finally {
       setIsTyping(false);
     }
@@ -87,65 +107,99 @@ export default function ChatBox() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto mt-10 bg-white rounded-xl shadow-lg flex flex-col h-[600px]">
-      <div className="p-4 border-b font-bold text-xl">StudyBuddy Chat</div>
-
-      <div className="p-4 border-b flex items-center gap-3">
-        <label className="text-sm font-semibold">Select Note</label>
-        <select
-          className="border rounded-md p-2 flex-1"
-          value={selectedNote}
-          onChange={(e) => setSelectedNote(e.target.value)}
+    <div className="flex max-w-6xl mx-auto mt-10 gap-4">
+      {/* Sessions sidebar */}
+      <div className="w-64 bg-gray-100 p-4 rounded-lg overflow-y-auto h-[600px]">
+        <div className="font-bold mb-2">Previous Conversations</div>
+        <button
+          onClick={startNewConversation}
+          className="bg-blue-500 text-white px-2 py-1 rounded mb-2 w-full"
         >
-          {notes.length === 0 ? (
-            <option value="">-- No notes found --</option>
-          ) : (
-            notes.map((n) => (
-              <option key={n.id} value={n.url}>
-                {n.name}
-              </option>
-            ))
-          )}
-        </select>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
-        {chat.map((m, i) => (
+          + New Conversation
+        </button>
+        {sessions.map((s, i) => (
           <div
             key={i}
-            className={`p-3 rounded-lg max-w-[80%] break-words ${
-              m.sender === "user"
-                ? "bg-blue-500 text-white ml-auto"
-                : "bg-gray-200 text-gray-800 mr-auto"
-            }`}
+            className="p-2 bg-white rounded mb-1 border cursor-pointer"
+            onClick={() => loadSession(s)}
           >
-            {m.text}
+            <div className="text-xs text-gray-500">{s.createdAt?.split("T")[0]}</div>
+            <div className="font-semibold text-sm truncate">{s.name || s.summary}</div>
           </div>
         ))}
+      </div>
 
-        {isTyping && (
-          <div className="p-3 rounded-lg bg-gray-200 text-gray-800 mr-auto animate-pulse">
-            StudyBuddy is typing...
+      {/* Chat window */}
+      <div className="flex-1 flex flex-col bg-white rounded-xl shadow-lg h-[600px]">
+        {/* Conversation name input */}
+        {currentSessionId === null && (
+          <div className="p-4 flex items-center gap-2 border-b">
+            <input
+              type="text"
+              value={conversationName}
+              onChange={(e) => setConversationName(e.target.value)}
+              placeholder="Enter conversation name..."
+              className="flex-1 border rounded-lg p-2"
+            />
           </div>
         )}
 
-        <div ref={messagesEndRef}></div>
-      </div>
+        {/* Note selector */}
+        <div className="p-4 border-b flex items-center gap-3">
+          <label className="text-sm font-semibold">Select Note</label>
+          <select
+            className="border rounded-md p-2 flex-1"
+            value={selectedNote}
+            onChange={e => setSelectedNote(e.target.value)}
+          >
+            {notes.map(n => (
+              <option key={n.id} value={n.url}>{n.name}</option>
+            ))}
+          </select>
+        </div>
 
-      <div className="p-4 border-t flex gap-2">
-        <input
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type your message..."
-          onKeyDown={handleKeyDown}
-          className="flex-1 border rounded-lg p-2"
-        />
-        <button
-          onClick={handleSend}
-          className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
-        >
-          Send
-        </button>
+        {/* Chat messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50" data-testid="chat-container">
+          {chat.map((m, i) => (
+            <div
+              key={i}
+              data-testid={m.sender}
+              className={`p-3 rounded-lg max-w-[80%] break-words ${
+                m.sender === "user"
+                  ? "bg-blue-500 text-white ml-auto"
+                  : "bg-gray-200 text-gray-800 mr-auto"
+              }`}
+            >
+              {m.text}
+            </div>
+          ))}
+          {isTyping && (
+            <div className="p-3 rounded-lg bg-gray-200 text-gray-800 mr-auto animate-pulse">
+              StudyBuddy is typing...
+            </div>
+          )}
+          <div ref={messagesEndRef}></div>
+        </div>
+
+        {/* Input */}
+        <div className="p-4 border-t flex gap-2">
+          <input
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type your message..."
+            className="flex-1 border rounded-lg p-2"
+            data-testid="chat-input"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!message.trim() || !selectedNote}
+            className="bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
+            data-testid="send-button"
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );
