@@ -1,7 +1,5 @@
-// src/components/Navbar.js
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-//import { useAuth } from "../AuthContext";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
@@ -42,7 +40,7 @@ export default function Navbar() {
             Upload
           </Link>
 
-          {/* Chat with AI link styled like other links */}
+          {/* Chat with AI */}
           {user && (
             <span
               onClick={() => navigate("/chat")}
@@ -52,6 +50,17 @@ export default function Navbar() {
             </span>
           )}
 
+          {/* Quiz Section */}
+          {user && (
+            <span
+              onClick={() => navigate("/quiz")}
+              className="hover:underline cursor-pointer"
+            >
+              Quiz
+            </span>
+          )}
+
+          {/* Auth Links */}
           {user ? (
             <>
               <Link to="/profile" className="hover:underline">

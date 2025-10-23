@@ -6,7 +6,8 @@ import Signup from "./pages/Signup";
 import UploadNotes from "./pages/UploadNotes";
 import ViewNotes from "./pages/ViewNotes";
 import Profile from "./pages/Profile";
-import Chatbox from "./pages/Chatbox"; // ✅ import ChatBox
+import Chatbox from "./pages/Chatbox";
+import Quiz from "./pages/Quiz"; // ✅ import your Quiz page
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useAuth } from "./context/AuthContext";
 
@@ -60,13 +61,21 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* ✅ New Chat route (protected, same style) */}
           <Route
             path="/chat"
             element={
               <ProtectedRoute>
                 <Chatbox />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ✅ New Quiz route */}
+          <Route
+            path="/quiz"
+            element={
+              <ProtectedRoute>
+                <Quiz />
               </ProtectedRoute>
             }
           />
