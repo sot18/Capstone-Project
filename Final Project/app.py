@@ -1,3 +1,4 @@
+
 # Import required libraries
 from flask import Flask, request, jsonify  # Flask for web server, request for HTTP data, jsonify to return JSON
 from flask_cors import CORS  # To handle Cross-Origin Resource Sharing
@@ -241,8 +242,6 @@ def generate_quiz():
             return jsonify({"error": "Missing UID or note selection"}), 400
 
         all_text = ""
-
-        # Fetch each note PDF and extract text
         for note_id in note_ids:
             note_ref = db.collection("notes").document(note_id).get()
             if note_ref.exists:
@@ -263,7 +262,7 @@ def generate_quiz():
         if not all_text.strip():
             return jsonify({"error": "No content found in selected notes"}), 400
 
-        # Build prompt for OpenAI
+        # OpenAI prompt
         prompt = f"""
 Generate 10 multiple-choice questions from the following notes.
 Each should have 4 options (A, B, C, D) and one correct answer.
@@ -277,39 +276,82 @@ Return ONLY a JSON array like this:
     "answer": "A"
   }}
 ]
-Do NOT include any explanations or extra text.
+Do NOT include explanations or extra text.
 """
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}]
         )
-
         content = response.choices[0].message.content.strip()
+        quiz_json = json.loads(content)
 
-        # Try to parse JSON safely
-        try:
-            quiz_json = json.loads(content)
-        except Exception as e:
-            print("JSON parsing error from OpenAI output:", content)
-            return jsonify({"error": f"Failed to parse JSON from OpenAI output: {str(e)}"}), 500
+        # Normalize to include 'choices' for frontend
+        normalized_quiz = []
+        for q in quiz_json:
+            normalized_quiz.append({
+                "question": q.get("question"),
+                "choices": q.get("options", []),
+                "answer": q.get("answer")
+            })
 
-        return jsonify({"questions": quiz_json})
+        # Store quiz for grading later
+        quiz_doc = db.collection("quizzes").add({
+            "user_id": uid,
+            "questions": normalized_quiz,
+            "difficulty": difficulty,
+            "createdAt": firestore.SERVER_TIMESTAMP
+        })
+
+        return jsonify({
+            "quiz": {"id": quiz_doc[1].id, "questions": normalized_quiz}
+        })
 
     except Exception as e:
         print("Error generating quiz:", e)
         return jsonify({"error": str(e)}), 500
 
-# ---------------- Quiz Section Endpoint (For Frontend Navigation) ----------------
-@app.route("/quiz", methods=["GET"])
-def quiz_section():
-    """
-    A simple endpoint to confirm the Quiz section is available.
-    Your React frontend (Quiz.jsx) will call /api/generate_quiz for actual quiz generation.
-    """
-    return jsonify({
-        "message": "Quiz section active! Use POST /api/generate_quiz to create quizzes."
-    })
+
+@app.route("/api/submit_quiz", methods=["POST"])
+def submit_quiz():
+    try:
+        data = request.get_json()
+        uid = data.get("uid")
+        quiz_id = data.get("quiz_id")
+        user_answers = data.get("answers", {})
+
+        if not uid or not quiz_id:
+            return jsonify({"error": "Missing UID or quiz ID"}), 400
+
+        quiz_ref = db.collection("quizzes").document(quiz_id).get()
+        if not quiz_ref.exists:
+            return jsonify({"error": "Quiz not found"}), 404
+
+        quiz_data = quiz_ref.to_dict()
+        questions = quiz_data.get("questions", [])
+
+        total = len(questions)
+        correct_count = 0
+
+        for idx, q in enumerate(questions):
+            correct_answer = q.get("answer")
+            user_answer = user_answers.get(str(idx)) or user_answers.get(idx)
+            if user_answer == correct_answer:
+                correct_count += 1
+
+        score = round((correct_count / total) * 100)
+
+        return jsonify({
+            "score": score,
+            "correct": correct_count,
+            "total": total
+        })
+
+    except Exception as e:
+        print("Error submitting quiz:", e)
+        return jsonify({"error": str(e)}), 500
+
+
 # ---------------- Run Flask app ----------------
 if __name__ == "__main__":
     # Run on all interfaces, port 5001, with debug mode on

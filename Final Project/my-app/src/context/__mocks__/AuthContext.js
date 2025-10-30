@@ -1,39 +1,23 @@
-jest.mock("../context/AuthContext"); 
-jest.mock("../firebase");            
-jest.mock("react-router-dom", () => {
-  const original = jest.requireActual("react-router-dom");
-  return { ...original, useNavigate: () => jest.fn() };
-});
+// src/context/__mocks__/AuthContext.js
 
-import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
-import Login from "../pages/Login";
-import { BrowserRouter } from "react-router-dom";
+export const useAuth = jest.fn(() => ({
+  user: { uid: "123", email: "test@example.com" },
+  login: jest.fn(),
+  logout: jest.fn(),
+}));
 
-describe("Login Component", () => {
-  test("renders login form", () => {
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
-
-    expect(screen.getByText(/Login/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Login/i })).toBeInTheDocument();
-  });
-
-  test("successful login calls login function", async () => {
-    const { useAuth } = require("../context/AuthContext");
-    const { login } = useAuth();
-
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Login/i }));
-
-    expect(login).toHaveBeenCalled();
-  });
-});
+// Mock for quiz functions
+export const fetchQuizQuestions = jest.fn((noteId, difficulty) =>
+  Promise.resolve([
+    {
+      question: "Q1?",
+      choices: { A: "Option 1", B: "Option 2", C: "Option 3", D: "Option 4" },
+      correctAnswer: "D",
+    },
+    {
+      question: "Q2?",
+      choices: { A: "Option A", B: "Option B", C: "Option C", D: "Option D" },
+      correctAnswer: "C",
+    },
+  ])
+);
