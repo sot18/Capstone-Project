@@ -230,6 +230,7 @@ def get_sessions():
         return jsonify({"error": str(e)}), 500
 
 
+# ---------------- Generate quiz ----------------
 @app.route("/api/generate_quiz", methods=["POST"])
 def generate_quiz():
     try:
@@ -262,40 +263,61 @@ def generate_quiz():
         if not all_text.strip():
             return jsonify({"error": "No content found in selected notes"}), 400
 
-        # OpenAI prompt
+        # --- Improved prompt to ensure correct structure ---
         prompt = f"""
-Generate 10 multiple-choice questions from the following notes.
-Each should have 4 options (A, B, C, D) and one correct answer.
-Difficulty: {difficulty}.
-Notes: {all_text}
-Return ONLY a JSON array like this:
-[
-  {{
-    "question": "Question text",
-    "options": ["A", "B", "C", "D"],
-    "answer": "A"
-  }}
-]
-Do NOT include explanations or extra text.
-"""
+        Generate 10 multiple-choice questions based on the following notes:
+        {all_text}
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        Each question must have 4 choices and a numeric correct_index (0–3).
+        Respond ONLY with valid JSON like this:
+
+        [
+          {{
+            "question": "string",
+            "choices": ["A", "B", "C", "D"],
+            "correct_index": 1
+          }}
+        ]
+        """
+
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+            temperature=0.7
         )
-        content = response.choices[0].message.content.strip()
-        quiz_json = json.loads(content)
 
-        # Normalize to include 'choices' for frontend
+        text_output = response.output_text.strip()
+
+        # --- Safely parse JSON output ---
+        import re, json
+        match = re.search(r"\[.*\]", text_output, re.DOTALL)
+        if match:
+            quiz_json = json.loads(match.group(0))
+        else:
+            quiz_json = []
+
+        # --- Validate and normalize output ---
         normalized_quiz = []
         for q in quiz_json:
-            normalized_quiz.append({
-                "question": q.get("question"),
-                "choices": q.get("options", []),
-                "answer": q.get("answer")
-            })
+            if (
+                isinstance(q, dict)
+                and "question" in q
+                and "choices" in q
+                and isinstance(q["choices"], list)
+                and "correct_index" in q
+                and isinstance(q["correct_index"], int)
+            ):
+                normalized_quiz.append(q)
 
-        # Store quiz for grading later
+        if not normalized_quiz:
+            normalized_quiz = [
+                {
+                    "question": "Example: What is 2 + 2?",
+                    "choices": ["2", "3", "4", "5"],
+                    "correct_index": 2
+                }
+            ]
+
         quiz_doc = db.collection("quizzes").add({
             "user_id": uid,
             "questions": normalized_quiz,
@@ -312,6 +334,7 @@ Do NOT include explanations or extra text.
         return jsonify({"error": str(e)}), 500
 
 
+# ---------------- Submit quiz ----------------
 @app.route("/api/submit_quiz", methods=["POST"])
 def submit_quiz():
     try:
@@ -332,24 +355,50 @@ def submit_quiz():
 
         total = len(questions)
         correct_count = 0
+        detailed_results = []
 
         for idx, q in enumerate(questions):
-            correct_answer = q.get("answer")
-            user_answer = user_answers.get(str(idx)) or user_answers.get(idx)
-            if user_answer == correct_answer:
+            correct_index = q.get("correct_index", None)
+            choices = q.get("choices", [])
+            correct_answer = (
+                choices[correct_index] if correct_index is not None and correct_index < len(choices) else ""
+            )
+
+            user_index = user_answers.get(str(idx)) or user_answers.get(idx)
+            try:
+                user_index = int(user_index)
+            except (ValueError, TypeError):
+                user_index = None
+
+            user_answer = (
+                choices[user_index] if user_index is not None and user_index < len(choices) else ""
+            )
+            is_correct = user_index == correct_index
+            if is_correct:
                 correct_count += 1
 
-        score = round((correct_count / total) * 100)
+            detailed_results.append({
+                "question": q.get("question"),
+                "choices": choices,
+                "correct_answer": correct_answer,
+                "user_answer": user_answer,
+                "is_correct": is_correct
+            })
+
+        score = round((correct_count / total) * 100) if total > 0 else 0
 
         return jsonify({
             "score": score,
             "correct": correct_count,
-            "total": total
+            "total": total,
+            "results": detailed_results
         })
 
     except Exception as e:
         print("Error submitting quiz:", e)
         return jsonify({"error": str(e)}), 500
+
+
 
 
 # ---------------- Run Flask app ----------------
