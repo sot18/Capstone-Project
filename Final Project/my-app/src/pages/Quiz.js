@@ -5,31 +5,81 @@ import html2canvas from "html2canvas";
 
 export default function Quiz() {
   const { user } = useAuth();
+
+  // Notes + quiz state
   const [notes, setNotes] = useState([]);
   const [selectedNote, setSelectedNote] = useState("");
   const [difficulty, setDifficulty] = useState("easy");
   const [quiz, setQuiz] = useState([]);
+  const [quizId, setQuizId] = useState("");
   const [answers, setAnswers] = useState({});
   const [score, setScore] = useState(null);
-  const [quizId, setQuizId] = useState("");
-  const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [resultData, setResultData] = useState(null);
 
+  // Loading
+  const [loading, setLoading] = useState(false);
+
+  // Timer state
+  const [timeLimit, setTimeLimit] = useState(0); // minutes (0 = no timer)
+  const [timeLeft, setTimeLeft] = useState(0); // seconds
+  const [timerRunning, setTimerRunning] = useState(false);
+
+  // Fetch notes on mount / when user changes
   useEffect(() => {
     if (!user) return;
     const fetchNotes = async () => {
       try {
         const res = await fetch(`http://localhost:5001/api/notes?uid=${user.uid}`);
         const data = await res.json();
-        setNotes(data);
-        if (data.length === 1) setSelectedNote(data[0].id);
+        setNotes(data || []);
+        if (Array.isArray(data) && data.length === 1) {
+          setSelectedNote(data[0].id);
+        }
       } catch (err) {
         console.error("Error fetching notes:", err);
       }
     };
     fetchNotes();
   }, [user]);
+
+  // Countdown effect
+  useEffect(() => {
+    if (!timerRunning || submitted) return;
+
+    // If timeLeft is 0 at start, auto-submit immediately
+    if (timeLeft === 0) {
+      setTimerRunning(false);
+      // Auto-submit: grade whatever answers exist
+      handleSubmitQuiz({ auto: true });
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setTimerRunning(false);
+          // Auto-submit when timer hits 0
+          handleSubmitQuiz({ auto: true });
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerRunning, submitted]); // note: timeLeft intentionally not in deps because we use setter callback
+
+  // Helper: format mm:ss
+  const formatTime = (secs) => {
+    const m = Math.floor(secs / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  };
 
   const handleGenerateQuiz = async () => {
     if (!user || !user.uid) return alert("Please log in first.");
@@ -41,6 +91,7 @@ export default function Quiz() {
     setSubmitted(false);
     setScore(null);
     setResultData(null);
+    setQuizId("");
 
     const payload = {
       uid: user.uid,
@@ -56,10 +107,22 @@ export default function Quiz() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Failed to generate quiz (${res.status})`);
+      if (!res.ok) {
+        throw new Error(data.error || `Failed to generate quiz (${res.status})`);
+      }
 
-      setQuiz(data.quiz?.questions || []);
+      const questions = data.quiz?.questions || [];
+      setQuiz(questions);
       setQuizId(data.quiz?.id || "");
+
+      // Start timer if selected
+      if (timeLimit > 0) {
+        setTimeLeft(timeLimit * 60); // convert minutes to seconds
+        setTimerRunning(true);
+      } else {
+        setTimeLeft(0);
+        setTimerRunning(false);
+      }
     } catch (err) {
       console.error("Error generating quiz:", err);
       alert("Failed to generate quiz. Please try again.");
@@ -69,11 +132,24 @@ export default function Quiz() {
   };
 
   const handleAnswer = (index, choiceLetter) => {
+    if (submitted || timeLeft === 0) return;
     setAnswers((prev) => ({ ...prev, [index]: choiceLetter }));
   };
 
-  const handleSubmitQuiz = () => {
+  // handleSubmitQuiz options: if { auto: true } then we won't require all answers
+  const handleSubmitQuiz = ({ auto = false } = {}) => {
     if (!quiz.length) return;
+
+    if (!auto) {
+      // manual submit: ensure they want to submit if not all answered
+      const answeredCount = Object.keys(answers).length;
+      if (answeredCount !== quiz.length) {
+        const proceed = window.confirm(
+          `You answered ${answeredCount} of ${quiz.length} questions. Submit anyway?`
+        );
+        if (!proceed) return;
+      }
+    }
 
     let correctCount = 0;
     const review = quiz.map((q, i) => {
@@ -94,9 +170,13 @@ export default function Quiz() {
     setScore(calculatedScore);
     setSubmitted(true);
     setResultData({ totalQuestions, correctCount, review });
+
+    // stop timer if it's running
+    setTimerRunning(false);
+    setTimeLeft((prev) => prev); // leave as-is (likely 0 if auto, or remaining time)
   };
 
-  // ✅ NEW: PDF Download Handler
+  // Improved PDF download (handles multi-page)
   const handleDownloadPDF = () => {
     const resultSection = document.getElementById("quiz-results");
     if (!resultSection) return;
@@ -107,14 +187,17 @@ export default function Quiz() {
       const imgWidth = 190;
       const pageHeight = 297;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
       let heightLeft = imgHeight;
       let position = 10;
 
+      // First page
       pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
       heightLeft -= pageHeight;
 
+      // Additional pages
       while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
+        position = 10 - (imgHeight - heightLeft);
         pdf.addPage();
         pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
         heightLeft -= pageHeight;
@@ -149,12 +232,30 @@ export default function Quiz() {
         )}
       </select>
 
+      {/* Timer selector (Option 1 - directly under Select Note) */}
+      <div className="mb-4">
+        <label className="block mb-2 font-semibold">Select Quiz Time:</label>
+        <select
+          className="border rounded-lg p-2 w-full"
+          value={timeLimit}
+          onChange={(e) => setTimeLimit(Number(e.target.value))}
+          disabled={loading || (quiz.length > 0 && !submitted)} // prevent changing during an active quiz
+        >
+          <option value={0}>No timer</option>
+          <option value={5}>5 minutes</option>
+          <option value={10}>10 minutes</option>
+          <option value={15}>15 minutes</option>
+          <option value={20}>20 minutes</option>
+        </select>
+      </div>
+
       <label htmlFor="difficulty" className="block mb-2 font-semibold">Select Difficulty:</label>
       <select
         id="difficulty"
         className="border rounded-lg p-2 w-full mb-4"
         value={difficulty}
         onChange={(e) => setDifficulty(e.target.value)}
+        disabled={loading || (quiz.length > 0 && !submitted)}
       >
         <option value="easy">Easy 🟢</option>
         <option value="medium">Medium 🟡</option>
@@ -171,6 +272,14 @@ export default function Quiz() {
         {loading ? "Generating..." : "Generate Quiz"}
       </button>
 
+      {/* Timer display */}
+      {quiz.length > 0 && (timerRunning || timeLeft > 0) && (
+        <div className="mt-4 p-3 bg-yellow-100 border rounded mb-4 text-center font-semibold">
+          ⏳ Time Remaining: {formatTime(timeLeft)}
+        </div>
+      )}
+
+      {/* Quiz questions (only when quiz exists and not yet submitted) */}
       {quiz.length > 0 && !submitted && (
         <div className="mt-6">
           <h2 className="text-xl font-semibold mb-3">Answer the Questions:</h2>
@@ -188,7 +297,7 @@ export default function Quiz() {
                         checked={answers[i] === letter}
                         onChange={() => handleAnswer(i, letter)}
                         className="mr-2 accent-blue-600"
-                        disabled={submitted}
+                        disabled={submitted || timeLeft === 0}
                       />
                       <span>{letter}. {opt}</span>
                     </label>
@@ -199,7 +308,7 @@ export default function Quiz() {
           </ul>
 
           <button
-            onClick={handleSubmitQuiz}
+            onClick={() => handleSubmitQuiz({ auto: false })}
             disabled={loading}
             className={`mt-6 w-full py-2 font-semibold text-white rounded-lg transition ${
               loading ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
@@ -210,6 +319,7 @@ export default function Quiz() {
         </div>
       )}
 
+      {/* Results */}
       {submitted && resultData && (
         <div className="mt-6" id="quiz-results">
           <div className="text-center bg-green-50 border border-green-200 rounded-lg p-4">
@@ -242,7 +352,6 @@ export default function Quiz() {
             ))}
           </ul>
 
-          {/* ✅ Download PDF Button */}
           <button
             onClick={handleDownloadPDF}
             className="mt-6 w-full py-2 font-semibold text-white rounded-lg bg-purple-600 hover:bg-purple-700"
@@ -252,11 +361,15 @@ export default function Quiz() {
 
           <button
             onClick={() => {
+              // Reset everything for a fresh quiz
               setQuiz([]);
               setAnswers({});
               setSubmitted(false);
               setScore(null);
               setResultData(null);
+              setQuizId("");
+              setTimerRunning(false);
+              setTimeLeft(0);
             }}
             className="mt-4 w-full py-2 font-semibold text-white rounded-lg bg-blue-600 hover:bg-blue-700"
           >

@@ -3,6 +3,20 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Quiz from "../pages/Quiz";
 import { useAuth } from "../context/AuthContext";
 
+
+// Mock jsPDF and html2canvas so tests don't try to use browser APIs
+jest.mock("jspdf", () => {
+  return jest.fn().mockImplementation(() => ({
+    save: jest.fn()
+  }));
+});
+
+jest.mock("html2canvas", () => {
+  return jest.fn().mockResolvedValue({
+    toDataURL: jest.fn().mockReturnValue("fake-image-data")
+  });
+});
+
 // Mock AuthContext
 jest.mock("../context/AuthContext", () => ({
   useAuth: jest.fn(),
@@ -225,4 +239,89 @@ test("shows alert if no note is selected", async () => {
       expect(window.alert).toHaveBeenCalledWith("Failed to generate quiz. Please try again.");
     });
   });
+
+  test("updates timer duration when user selects a time", async () => {
+  fetch.mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] });
+
+  render(<Quiz />);
+
+  const timerSelect = await screen.findByLabelText(/Select Time/i);
+
+  fireEvent.change(timerSelect, { target: { value: "120" } }); // 2 minutes
+
+  expect(timerSelect.value).toBe("120");
+});
+
+test("starts countdown timer after generating quiz", async () => {
+  jest.useFakeTimers();
+
+  fetch
+    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        quiz: {
+          id: "quiz1",
+          questions: [{ question: "Q1?", choices: ["A"], correct_index: 0 }],
+        },
+      }),
+    });
+
+  render(<Quiz />);
+
+  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+  fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "60" } }); // 1 minute
+
+  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+  await screen.findByText(/Q1\?/i);
+
+  // Timer should start at 01:00
+  expect(screen.getByText("01:00")).toBeInTheDocument();
+
+  // Fast-forward 1 second
+  jest.advanceTimersByTime(1000);
+
+  // Timer should now be 00:59
+  expect(screen.getByText("00:59")).toBeInTheDocument();
+
+  jest.useRealTimers();
+});
+
+test("auto-submits the quiz when timer expires", async () => {
+  jest.useFakeTimers();
+
+  fetch
+    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        quiz: {
+          id: "quiz1",
+          questions: [
+            { question: "Q1?", choices: ["A", "B"], correct_index: 0 }
+          ],
+        },
+      }),
+    });
+
+  render(<Quiz />);
+
+  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+  fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "5" } }); // 5 sec timer
+
+  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+  await screen.findByText(/Q1\?/i);
+
+  // Fast-forward to timer expiration
+  jest.advanceTimersByTime(5000);
+
+  // Should auto-submit and show the review section
+  expect(await screen.findByText(/Correct Answer:/i)).toBeInTheDocument();
+
+  jest.useRealTimers();
+});
+
+
 });
