@@ -2,7 +2,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Quiz from "../pages/Quiz";
 import { useAuth } from "../context/AuthContext";
-
+import axios from "axios";
 
 // Mock jsPDF and html2canvas so tests don't try to use browser APIs
 jest.mock("jspdf", () => {
@@ -25,6 +25,9 @@ jest.mock("../context/AuthContext", () => ({
 // Mock fetch globally
 global.fetch = jest.fn();
 
+// Mock axios for stats API
+jest.mock("axios");
+
 describe("Quiz Component", () => {
   const mockUser = { uid: "test-uid" };
 
@@ -32,101 +35,23 @@ describe("Quiz Component", () => {
     jest.clearAllMocks();
     useAuth.mockReturnValue({ user: mockUser });
   });
-test("shows alert if no note is selected", async () => {
-  fetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
 
-  render(<Quiz />);
+  test("shows alert if no note is selected", async () => {
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
 
-  const button = screen.getByRole("button", { name: /Generate Quiz/i });
-
-  // Button should be disabled if no note is selected
-  expect(button).toBeDisabled();
-});
+    render(<Quiz />);
+    const button = screen.getByRole("button", { name: /Generate Quiz/i });
+    expect(button).toBeDisabled();
+  });
 
   test("shows message when user has no notes", async () => {
     fetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
 
     render(<Quiz />);
-    expect(
-      await screen.findByText(/No notes found. Please upload some notes first./i)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/No notes found. Please upload some notes first./i)).toBeInTheDocument();
   });
 
- test("generates and displays quiz questions when a note is selected", async () => {
-  fetch
-    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        quiz: {
-          id: "quiz1",
-          questions: [{ question: "Sample question?", choices: ["A", "B", "C", "D"], correct_index: 0 }],
-        },
-      }),
-    });
-
-  render(<Quiz />);
-  await screen.findByText("Note 1");
-
-  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
-  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
-
-  expect(await screen.findByText(/Sample question\?/i)).toBeInTheDocument();
-
-  // Use findAllByText to avoid multiple match error
-  const optionA = await screen.findAllByText(/^A\./);
-  const optionB = await screen.findAllByText(/^B\./);
-  expect(optionA[0]).toBeInTheDocument();
-  expect(optionB[0]).toBeInTheDocument();
-});
-
- test("grades the quiz and shows correct/wrong answers", async () => {
-  fetch
-    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        quiz: {
-          id: "quiz1",
-          questions: [
-            { question: "Q1?", choices: ["A", "B"], correct_index: 0 },
-            { question: "Q2?", choices: ["C", "D"], correct_index: 1 },
-          ],
-        },
-      }),
-    });
-
-  render(<Quiz />);
-  await screen.findByText("Note 1");
-
-  // Select the note
-  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
-  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
-
-  // Wait for questions to render
-  await screen.findByText(/Q1\?/i);
-
-  // Select answers
-  fireEvent.click(screen.getAllByLabelText(/B/i)[0]); // Q1 choose B
-  fireEvent.click(screen.getAllByLabelText(/D/i)[0]); // Q2 choose D
-  fireEvent.click(screen.getByRole("button", { name: /Submit Quiz/i }));
-
-  // Check the review text
-  expect(
-    await screen.findByText((content) =>
-      content.includes("Your Answer: B") && content.includes("Correct: A")
-    )
-  ).toBeInTheDocument();
-
-  expect(
-    await screen.findByText((content) =>
-      content.includes("Your Answer: None") && content.includes("Correct: B")
-    )
-  ).toBeInTheDocument();
-});
-
-
-  test("resets quiz when 'Generate New Quiz' is clicked", async () => {
+  test("generates and displays quiz questions when a note is selected", async () => {
     fetch
       .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
       .mockResolvedValueOnce({
@@ -134,8 +59,72 @@ test("shows alert if no note is selected", async () => {
         json: async () => ({
           quiz: {
             id: "quiz1",
-            questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }],
+            questions: [{ question: "Sample question?", choices: ["A", "B", "C", "D"], correct_index: 0 }],
           },
+        }),
+      });
+
+    render(<Quiz />);
+    await screen.findByText("Note 1");
+
+    fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+    expect(await screen.findByText(/Sample question\?/i)).toBeInTheDocument();
+    const optionA = await screen.findAllByText(/^A\./);
+    const optionB = await screen.findAllByText(/^B\./);
+    expect(optionA[0]).toBeInTheDocument();
+    expect(optionB[0]).toBeInTheDocument();
+  });
+
+  test("grades the quiz and shows correct/wrong answers", async () => {
+    fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          quiz: {
+            id: "quiz1",
+            questions: [
+              { question: "Q1?", choices: ["A", "B"], correct_index: 0 },
+              { question: "Q2?", choices: ["C", "D"], correct_index: 1 },
+            ],
+          },
+        }),
+      });
+
+    render(<Quiz />);
+    await screen.findByText("Note 1");
+
+    fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+    await screen.findByText(/Q1\?/i);
+
+    fireEvent.click(screen.getAllByLabelText(/B/i)[0]);
+    fireEvent.click(screen.getAllByLabelText(/D/i)[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Submit Quiz/i }));
+
+    expect(
+      await screen.findByText((content) =>
+        content.includes("Your Answer: B") && content.includes("Correct: A")
+      )
+    ).toBeInTheDocument();
+
+    expect(
+      await screen.findByText((content) =>
+        content.includes("Your Answer: None") && content.includes("Correct: B")
+      )
+    ).toBeInTheDocument();
+  });
+
+  test("resets quiz when 'Generate New Quiz' is clicked", async () => {
+    fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          quiz: { id: "quiz1", questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }] },
         }),
       });
 
@@ -159,10 +148,7 @@ test("shows alert if no note is selected", async () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          quiz: {
-            id: "quiz1",
-            questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }],
-          },
+          quiz: { id: "quiz1", questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }] },
         }),
       });
 
@@ -179,35 +165,33 @@ test("shows alert if no note is selected", async () => {
   });
 
   test("shows loading message while fetching quiz", async () => {
-  fetch
-    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(
-            () =>
-              resolve({
-                ok: true,
-                json: async () => ({
-                  quiz: { id: "quiz1", questions: [{ question: "Delayed question?", choices: ["A"], correct_index: 0 }] },
+    fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  ok: true,
+                  json: async () => ({
+                    quiz: { id: "quiz1", questions: [{ question: "Delayed question?", choices: ["A"], correct_index: 0 }] },
+                  }),
                 }),
-              }),
-            100
+              100
+            )
           )
-        )
-    );
+      );
 
-  render(<Quiz />);
-  await screen.findByText("Note 1");
+    render(<Quiz />);
+    await screen.findByText("Note 1");
 
-  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
-  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+    fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
 
-  // Check button text instead of loading message
-  expect(screen.getByRole("button", { name: /Generating\.\.\./i })).toBeDisabled();
-
-  await screen.findByText(/Delayed question\?/i);
-});
+    expect(screen.getByRole("button", { name: /Generating\.\.\./i })).toBeDisabled();
+    await screen.findByText(/Delayed question\?/i);
+  });
 
   test("disables Generate Quiz button while quiz is loading", async () => {
     fetch.mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] });
@@ -241,87 +225,91 @@ test("shows alert if no note is selected", async () => {
   });
 
   test("updates timer duration when user selects a time", async () => {
-  fetch.mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] });
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] });
 
-  render(<Quiz />);
+    render(<Quiz />);
 
-  const timerSelect = await screen.findByLabelText(/Select Time/i);
+    const timerSelect = await screen.findByLabelText(/Select Time/i);
+    fireEvent.change(timerSelect, { target: { value: "120" } });
+    expect(timerSelect.value).toBe("120");
+  });
 
-  fireEvent.change(timerSelect, { target: { value: "120" } }); // 2 minutes
+  test("starts countdown timer after generating quiz", async () => {
+    jest.useFakeTimers();
 
-  expect(timerSelect.value).toBe("120");
-});
+    fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          quiz: { id: "quiz1", questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }] },
+        }),
+      });
 
-test("starts countdown timer after generating quiz", async () => {
-  jest.useFakeTimers();
+    render(<Quiz />);
+    fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+    fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "60" } });
 
-  fetch
-    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        quiz: {
-          id: "quiz1",
-          questions: [{ question: "Q1?", choices: ["A"], correct_index: 0 }],
-        },
-      }),
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+    await screen.findByText(/Q1\?/i);
+
+    expect(screen.getByText("01:00")).toBeInTheDocument();
+    jest.advanceTimersByTime(1000);
+    expect(screen.getByText("00:59")).toBeInTheDocument();
+
+    jest.useRealTimers();
+  });
+
+  test("auto-submits the quiz when timer expires", async () => {
+    jest.useFakeTimers();
+
+    fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          quiz: { id: "quiz1", questions: [{ question: "Q1?", choices: ["A", "B"], correct_index: 0 }] },
+        }),
+      });
+
+    render(<Quiz />);
+    fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+    fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "5" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+    await screen.findByText(/Q1\?/i);
+
+    jest.advanceTimersByTime(5000);
+    expect(await screen.findByText(/Correct Answer:/i)).toBeInTheDocument();
+
+    jest.useRealTimers();
+  });
+
+  // ----------------- New tests for total quizzes taken -----------------
+  test("displays total quizzes taken from API", async () => {
+    axios.get.mockResolvedValueOnce({ data: { totalQuizzesTaken: 5 } });
+
+    render(<Quiz />);
+    await waitFor(() => {
+      expect(screen.getByText(/Total Quizzes Taken: 5/i)).toBeInTheDocument();
     });
+  });
 
-  render(<Quiz />);
+  test("shows zero if user has not taken any quizzes", async () => {
+    axios.get.mockResolvedValueOnce({ data: { totalQuizzesTaken: 0 } });
 
-  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
-  fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "60" } }); // 1 minute
-
-  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
-
-  await screen.findByText(/Q1\?/i);
-
-  // Timer should start at 01:00
-  expect(screen.getByText("01:00")).toBeInTheDocument();
-
-  // Fast-forward 1 second
-  jest.advanceTimersByTime(1000);
-
-  // Timer should now be 00:59
-  expect(screen.getByText("00:59")).toBeInTheDocument();
-
-  jest.useRealTimers();
-});
-
-test("auto-submits the quiz when timer expires", async () => {
-  jest.useFakeTimers();
-
-  fetch
-    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] })
-    .mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        quiz: {
-          id: "quiz1",
-          questions: [
-            { question: "Q1?", choices: ["A", "B"], correct_index: 0 }
-          ],
-        },
-      }),
+    render(<Quiz />);
+    await waitFor(() => {
+      expect(screen.getByText(/Total Quizzes Taken: 0/i)).toBeInTheDocument();
     });
+  });
 
-  render(<Quiz />);
+  test("handles API error when fetching total quizzes taken", async () => {
+    axios.get.mockRejectedValueOnce(new Error("API Error"));
 
-  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
-  fireEvent.change(screen.getByLabelText(/Select Time/i), { target: { value: "5" } }); // 5 sec timer
-
-  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
-
-  await screen.findByText(/Q1\?/i);
-
-  // Fast-forward to timer expiration
-  jest.advanceTimersByTime(5000);
-
-  // Should auto-submit and show the review section
-  expect(await screen.findByText(/Correct Answer:/i)).toBeInTheDocument();
-
-  jest.useRealTimers();
-});
-
-
+    render(<Quiz />);
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load quiz stats/i)).toBeInTheDocument();
+    });
+  });
 });

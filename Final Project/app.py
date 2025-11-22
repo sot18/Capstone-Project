@@ -334,7 +334,6 @@ def generate_quiz():
         return jsonify({"error": str(e)}), 500
 
 
-# ---------------- Submit quiz ----------------
 @app.route("/api/submit_quiz", methods=["POST"])
 def submit_quiz():
     try:
@@ -387,6 +386,17 @@ def submit_quiz():
 
         score = round((correct_count / total) * 100) if total > 0 else 0
 
+        # --- Save quiz submission to quiz_results collection ---
+        db.collection("quiz_results").add({
+            "user_id": uid,
+            "quiz_id": quiz_id,
+            "score": score,
+            "correct": correct_count,
+            "total": total,
+            "answers": user_answers,
+            "createdAt": firestore.SERVER_TIMESTAMP
+        })
+
         return jsonify({
             "score": score,
             "correct": correct_count,
@@ -396,6 +406,32 @@ def submit_quiz():
 
     except Exception as e:
         print("Error submitting quiz:", e)
+        return jsonify({"error": str(e)}), 500
+
+    
+    # ---------------- User Statistics ----------------
+@app.route("/api/stats", methods=["GET"])
+def get_stats():
+    try:
+        uid = request.args.get("uid")
+        if not uid:
+            return jsonify({"error": "Missing uid"}), 400
+
+        # Count total notes uploaded
+        notes_ref = db.collection("notes").where("userId", "==", uid)
+        notes_count = len(list(notes_ref.stream()))
+
+        # Count total quizzes taken
+        quiz_results_ref = db.collection("quiz_results").where("user_id", "==", uid)
+        quizzes_taken = len(list(quiz_results_ref.stream()))
+
+        return jsonify({
+            "totalNotes": notes_count,
+            "totalQuizzesTaken": quizzes_taken
+        }), 200
+
+    except Exception as e:
+        print("Stats error:", e)
         return jsonify({"error": str(e)}), 500
 
 

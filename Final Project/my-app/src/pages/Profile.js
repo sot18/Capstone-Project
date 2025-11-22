@@ -11,7 +11,7 @@ import {
   orderBy,
   limit,
   getDocs,
-  where
+  where,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useNavigate } from "react-router-dom";
@@ -19,10 +19,18 @@ import { useNavigate } from "react-router-dom";
 export default function Profile() {
   const { user } = useAuth();
   const navigate = useNavigate();
+
   const [userData, setUserData] = useState(null);
   const [recentActivities, setRecentActivities] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [profilePic, setProfilePic] = useState(null);
+
+  // Keep only this statistic (local)
+  const [totalNotes, setTotalNotes] = useState(0);
+
+  // Stats from backend
+  const [backendTotalNotes, setBackendTotalNotes] = useState(null);
+  const [backendTotalQuizzes, setBackendTotalQuizzes] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -32,7 +40,6 @@ export default function Profile() {
       const docSnap = await getDoc(userRef);
 
       if (!docSnap.exists()) {
-        // Create user document if missing
         await setDoc(userRef, {
           firstName: "",
           lastName: "",
@@ -42,7 +49,6 @@ export default function Profile() {
           profilePicUrl: "",
         });
       }
-
       return userRef;
     };
 
@@ -63,25 +69,75 @@ export default function Profile() {
     };
 
     const fetchActivities = async () => {
-  try {
-    const activitiesRef = collection(db, "activities");
-    const q = query(
-      activitiesRef,
-      where("userId", "==", user.uid), // filter by current user
-      orderBy("timestamp", "desc"),
-      limit(5)
-    );
-    const snapshot = await getDocs(q);
-    const activities = snapshot.docs.map((doc) => doc.data().description);
-    setRecentActivities(activities.length > 0 ? activities : ["No recent activities"]);
-  } catch (err) {
-    console.error("Error fetching activities:", err);
-    setRecentActivities(["No recent activities"]);
-  }
-};
+      try {
+        const activitiesRef = collection(db, "activities");
+        const q = query(
+          activitiesRef,
+          where("userId", "==", user.uid),
+          orderBy("timestamp", "desc"),
+          limit(5)
+        );
+        const snapshot = await getDocs(q);
+        const activities = snapshot.docs.map((doc) => doc.data().description);
+        setRecentActivities(
+          activities.length > 0 ? activities : ["No recent activities"]
+        );
+      } catch (err) {
+        console.error("Error fetching activities:", err);
+        setRecentActivities(["No recent activities"]);
+      }
+    };
+
+    const fetchNoteStats = async () => {
+      try {
+        const notesRef = collection(db, "notes");
+
+        // Count all notes uploaded by this user
+        const q1 = query(notesRef, where("userId", "==", user.uid));
+        const allNotesSnap = await getDocs(q1);
+        setTotalNotes(allNotesSnap.size);
+      } catch (err) {
+        console.error("Error counting notes:", err);
+      }
+    };
+
+    // NEW: fetch authoritative stats from backend
+    const fetchStats = async () => {
+      try {
+        const res = await fetch(`http://localhost:5001/api/stats?uid=${user.uid}`);
+        const data = await res.json();
+        if (!res.ok) {
+          console.warn("Stats fetch failed:", data);
+          return;
+        }
+        setBackendTotalNotes(data.totalNotes ?? null);
+        setBackendTotalQuizzes(data.totalQuizzesTaken ?? null);
+        // Optionally update userData.totalQuizzes with backend value
+        setUserData((prev) => ({
+          ...prev,
+          totalQuizzes: data.totalQuizzesTaken ?? prev?.totalQuizzes,
+        }));
+        // Optionally update totalNotes to backend authoritative value
+        setTotalNotes(data.totalNotes ?? ((prev) => prev));
+      } catch (err) {
+        console.error("Error fetching stats from backend:", err);
+      }
+    };
 
     fetchUserData();
     fetchActivities();
+    fetchNoteStats();
+    fetchStats();
+
+    // Listen for quiz submissions to refresh stats
+    const onQuizSubmitted = () => {
+      fetchStats();
+    };
+    window.addEventListener("quizSubmitted", onQuizSubmitted);
+
+    return () => {
+      window.removeEventListener("quizSubmitted", onQuizSubmitted);
+    };
   }, [user]);
 
   const handleProfilePicUpload = async (e) => {
@@ -94,7 +150,6 @@ export default function Profile() {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
-      // Merge new profilePicUrl into user doc
       await setDoc(
         doc(db, "users", user.uid),
         { profilePicUrl: url },
@@ -122,8 +177,7 @@ export default function Profile() {
         />
         <div>
           <h2 className="text-2xl font-bold">
-            {userData.firstName || "First Name"}{" "}
-            {userData.lastName || "Last Name"}
+            {userData.firstName || "First Name"} {userData.lastName || "Last Name"}
           </h2>
           <p className="text-gray-600">{userData.email}</p>
           <p className="text-gray-500 text-sm">
@@ -132,10 +186,13 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Account Statistics & Actions */}
+      {/* Account Statistics */}
       <div className="bg-white shadow-md rounded-xl p-4 mb-6">
         <h3 className="text-lg font-semibold mb-2">Account Statistics</h3>
-        <p>Total Quizzes Taken: {userData.totalQuizzes || 0}</p>
+
+        <p><strong>Total Notes Uploaded:</strong> {backendTotalNotes !== null ? backendTotalNotes : totalNotes}</p>
+        <p><strong>Total Quizzes Taken:</strong> {backendTotalQuizzes !== null ? backendTotalQuizzes : (userData.totalQuizzes || 0)}</p>
+
         <div className="flex space-x-2 mt-3">
           <label className="px-3 py-1 bg-blue-500 text-white rounded-lg cursor-pointer">
             {uploading ? "Uploading..." : "Edit Profile"}
@@ -146,6 +203,7 @@ export default function Profile() {
               onChange={handleProfilePicUpload}
             />
           </label>
+
           <button
             className="px-3 py-1 bg-green-500 text-white rounded-lg"
             onClick={() => navigate("/notes")}

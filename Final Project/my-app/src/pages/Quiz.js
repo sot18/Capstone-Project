@@ -1,3 +1,4 @@
+// src/pages/Quiz.js
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import jsPDF from "jspdf";
@@ -136,6 +137,26 @@ export default function Quiz() {
     setAnswers((prev) => ({ ...prev, [index]: choiceLetter }));
   };
 
+  // helper to POST quiz results to backend
+  const postQuizResultsToBackend = async (payloadAnswersObj, finalScore, correctCount, totalQ) => {
+    if (!user || !user.uid) return;
+    try {
+      await fetch("http://localhost:5001/api/submit_quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: user.uid,
+          quiz_id: quizId,
+          answers: payloadAnswersObj,
+        }),
+      });
+      // notify profile to refresh stats
+      window.dispatchEvent(new Event("quizSubmitted"));
+    } catch (err) {
+      console.error("Error posting quiz results to backend:", err);
+    }
+  };
+
   // handleSubmitQuiz options: if { auto: true } then we won't require all answers
   const handleSubmitQuiz = ({ auto = false } = {}) => {
     if (!quiz.length) return;
@@ -174,6 +195,28 @@ export default function Quiz() {
     // stop timer if it's running
     setTimerRunning(false);
     setTimeLeft((prev) => prev); // leave as-is (likely 0 if auto, or remaining time)
+
+    // NEW: convert answers (letters) to numeric indices (0,1,2,3) for backend
+    const payloadAnswers = {};
+    Object.keys(answers).forEach((key) => {
+      const val = answers[key];
+      if (typeof val === "string") {
+        const num = val.charCodeAt(0) - 65;
+        if (!Number.isNaN(num)) {
+          payloadAnswers[key] = num;
+        }
+      } else {
+        // if already numeric (rare), send as int
+        try {
+          payloadAnswers[key] = parseInt(val, 10);
+        } catch (e) {
+          // skip invalid
+        }
+      }
+    });
+
+    // POST results to backend so it saves and increments quiz counter (non-blocking)
+    postQuizResultsToBackend(payloadAnswers, calculatedScore, correctCount, totalQuestions);
   };
 
   // Improved PDF download (handles multi-page)
