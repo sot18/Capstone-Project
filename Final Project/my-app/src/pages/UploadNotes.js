@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { getFirestore, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+
+// IMPORTANT: use the shared helper so we don't create a separate collection name
+import { logActivity } from "../utils/logActivity";
 
 const UploadNotes = () => {
   const [user, setUser] = useState(null);
@@ -18,7 +26,7 @@ const UploadNotes = () => {
       setUser(currentUser);
     });
     return () => unsubscribe();
-  }, []);
+  }, [auth]);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -32,7 +40,7 @@ const UploadNotes = () => {
     }
 
     if (selectedFile.size > 10 * 1024 * 1024) {
-      setMessage({ type: "error", text: "File is too large" });
+      setMessage({ type: "error", text: "File too large (limit 10MB)" });
       setFile(null);
       return;
     }
@@ -57,12 +65,24 @@ const UploadNotes = () => {
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
+      // Keep the original behavior: save note metadata to "notes"
       await addDoc(collection(db, "notes"), {
         userId: user.uid,
         fileName: file.name,
         fileUrl: url,
         createdAt: serverTimestamp(),
       });
+
+      // --- NEW/SAFE: Log activity via shared helper (writes to `activities`) ---
+      // This ensures Profile.js picks it up and nothing else changes.
+      try {
+        await logActivity(user.uid, `Uploaded note: ${file.name}`);
+        // logActivity already dispatches "activityLogged", but just in case:
+        window.dispatchEvent(new Event("activityLogged"));
+      } catch (logErr) {
+        // non-fatal — still continue
+        console.warn("Activity log failed:", logErr);
+      }
 
       setMessage({ type: "success", text: "File uploaded successfully!" });
       setFile(null);
@@ -71,13 +91,13 @@ const UploadNotes = () => {
       setMessage({
         type: "error",
         text:
-          error.code === "storage/unauthorized"
-            ? "Upload failed: insufficient permissions. Check your Storage rules."
+          error?.code === "storage/unauthorized"
+            ? "Upload failed: insufficient permissions."
             : "Upload failed. Try again.",
       });
+    } finally {
+      setUploading(false);
     }
-
-    setUploading(false);
   };
 
   return (
@@ -99,6 +119,7 @@ const UploadNotes = () => {
             className="hidden"
             id="file-upload"
           />
+
           <label
             htmlFor="file-upload"
             className="cursor-pointer w-full flex justify-center items-center py-10 text-gray-400 hover:text-blue-600 transition-colors"

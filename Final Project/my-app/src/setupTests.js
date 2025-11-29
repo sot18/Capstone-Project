@@ -31,5 +31,13 @@ beforeAll(() => {
   });
 });
 
+/*
+========================================================
+✅ To run a single test file, use this command:
 
+npx jest --testPathPattern="__tests__/NAME_OF_TEST_FILE.test.js"
 
+Example:
+npx jest --testPathPattern="__tests__/Login.test.js"
+========================================================
+*/

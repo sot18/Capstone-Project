@@ -25,10 +25,7 @@ export default function Profile() {
   const [uploading, setUploading] = useState(false);
   const [profilePic, setProfilePic] = useState(null);
 
-  // Keep only this statistic (local)
   const [totalNotes, setTotalNotes] = useState(0);
-
-  // Stats from backend
   const [backendTotalNotes, setBackendTotalNotes] = useState(null);
   const [backendTotalQuizzes, setBackendTotalQuizzes] = useState(null);
 
@@ -75,10 +72,12 @@ export default function Profile() {
           activitiesRef,
           where("userId", "==", user.uid),
           orderBy("timestamp", "desc"),
-          limit(5)
+          limit(3) // 🔥 Show only latest 3 activities
         );
+
         const snapshot = await getDocs(q);
         const activities = snapshot.docs.map((doc) => doc.data().description);
+
         setRecentActivities(
           activities.length > 0 ? activities : ["No recent activities"]
         );
@@ -91,8 +90,6 @@ export default function Profile() {
     const fetchNoteStats = async () => {
       try {
         const notesRef = collection(db, "notes");
-
-        // Count all notes uploaded by this user
         const q1 = query(notesRef, where("userId", "==", user.uid));
         const allNotesSnap = await getDocs(q1);
         setTotalNotes(allNotesSnap.size);
@@ -101,23 +98,20 @@ export default function Profile() {
       }
     };
 
-    // NEW: fetch authoritative stats from backend
     const fetchStats = async () => {
       try {
         const res = await fetch(`http://localhost:5001/api/stats?uid=${user.uid}`);
         const data = await res.json();
-        if (!res.ok) {
-          console.warn("Stats fetch failed:", data);
-          return;
-        }
+        if (!res.ok) return;
+
         setBackendTotalNotes(data.totalNotes ?? null);
         setBackendTotalQuizzes(data.totalQuizzesTaken ?? null);
-        // Optionally update userData.totalQuizzes with backend value
+
         setUserData((prev) => ({
           ...prev,
           totalQuizzes: data.totalQuizzesTaken ?? prev?.totalQuizzes,
         }));
-        // Optionally update totalNotes to backend authoritative value
+
         setTotalNotes(data.totalNotes ?? ((prev) => prev));
       } catch (err) {
         console.error("Error fetching stats from backend:", err);
@@ -129,14 +123,12 @@ export default function Profile() {
     fetchNoteStats();
     fetchStats();
 
-    // Listen for quiz submissions to refresh stats
-    const onQuizSubmitted = () => {
-      fetchStats();
-    };
-    window.addEventListener("quizSubmitted", onQuizSubmitted);
+    // 🔥 Auto-refresh profile activities when new activity is logged
+    const refreshActivities = () => fetchActivities();
+    window.addEventListener("activityLogged", refreshActivities);
 
     return () => {
-      window.removeEventListener("quizSubmitted", onQuizSubmitted);
+      window.removeEventListener("activityLogged", refreshActivities);
     };
   }, [user]);
 

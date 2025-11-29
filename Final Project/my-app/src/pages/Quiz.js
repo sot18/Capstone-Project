@@ -4,6 +4,9 @@ import { useAuth } from "../context/AuthContext";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
+// Activity helper
+import { logActivity } from "../utils/logActivity";
+
 export default function Quiz() {
   const { user } = useAuth();
 
@@ -25,6 +28,12 @@ export default function Quiz() {
   const [timeLimit, setTimeLimit] = useState(0); // minutes (0 = no timer)
   const [timeLeft, setTimeLeft] = useState(0); // seconds
   const [timerRunning, setTimerRunning] = useState(false);
+
+  // Helper to get note name from selectedNote id
+  const getSelectedNoteName = () => {
+    const noteObj = notes.find((n) => n.id === selectedNote);
+    return noteObj?.name || selectedNote || "Unnamed Note";
+  };
 
   // Fetch notes on mount / when user changes
   useEffect(() => {
@@ -116,6 +125,15 @@ export default function Quiz() {
       setQuiz(questions);
       setQuizId(data.quiz?.id || "");
 
+      // Log activity: quiz started
+      try {
+        const noteName = getSelectedNoteName();
+        await logActivity(user.uid, `Started quiz from note: ${noteName}`);
+        window.dispatchEvent(new Event("activityLogged"));
+      } catch (logErr) {
+        console.warn("Failed to log quiz start activity:", logErr);
+      }
+
       // Start timer if selected
       if (timeLimit > 0) {
         setTimeLeft(timeLimit * 60); // convert minutes to seconds
@@ -150,15 +168,16 @@ export default function Quiz() {
           answers: payloadAnswersObj,
         }),
       });
-      // notify profile to refresh stats
+      // notify profile to refresh stats (legacy)
       window.dispatchEvent(new Event("quizSubmitted"));
     } catch (err) {
       console.error("Error posting quiz results to backend:", err);
+      throw err;
     }
   };
 
   // handleSubmitQuiz options: if { auto: true } then we won't require all answers
-  const handleSubmitQuiz = ({ auto = false } = {}) => {
+  const handleSubmitQuiz = async ({ auto = false } = {}) => {
     if (!quiz.length) return;
 
     if (!auto) {
@@ -196,7 +215,7 @@ export default function Quiz() {
     setTimerRunning(false);
     setTimeLeft((prev) => prev); // leave as-is (likely 0 if auto, or remaining time)
 
-    // NEW: convert answers (letters) to numeric indices (0,1,2,3) for backend
+    // convert answers (letters) to numeric indices (0,1,2,3) for backend
     const payloadAnswers = {};
     Object.keys(answers).forEach((key) => {
       const val = answers[key];
@@ -215,8 +234,25 @@ export default function Quiz() {
       }
     });
 
-    // POST results to backend so it saves and increments quiz counter (non-blocking)
-    postQuizResultsToBackend(payloadAnswers, calculatedScore, correctCount, totalQuestions);
+    // POST results to backend so it saves and increments quiz counter (await it)
+    try {
+      await postQuizResultsToBackend(payloadAnswers, calculatedScore, correctCount, totalQuestions);
+    } catch (err) {
+      // already logged inside; continue to log activity anyway
+    }
+
+    // Log activity: quiz completed (include note name + score)
+    try {
+      const noteName = getSelectedNoteName();
+      await logActivity(
+        user.uid,
+        `Completed quiz from note: ${noteName} — ${calculatedScore}% (${correctCount}/${totalQuestions})`
+      );
+      // Notify Profile to refresh
+      window.dispatchEvent(new Event("activityLogged"));
+    } catch (logErr) {
+      console.warn("Failed to log quiz completion activity:", logErr);
+    }
   };
 
   // Improved PDF download (handles multi-page)
@@ -275,7 +311,7 @@ export default function Quiz() {
         )}
       </select>
 
-      {/* Timer selector (Option 1 - directly under Select Note) */}
+      {/* Timer selector */}
       <div className="mb-4">
         <label className="block mb-2 font-semibold">Select Quiz Time:</label>
         <select

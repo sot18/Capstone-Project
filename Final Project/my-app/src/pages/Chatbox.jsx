@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 
-// ✅ NEW IMPORTS
+// ✅ ADD THIS IMPORT
+import { logActivity } from "../utils/logActivity";
+
+// Existing imports below
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
@@ -26,20 +29,20 @@ export default function ChatBox() {
   useEffect(() => {
     if (!user) return;
     fetch(`http://localhost:5001/api/notes?uid=${user.uid}`)
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         setNotes(data);
         if (data.length > 0) setSelectedNote(data[0].url);
       })
-      .catch(err => console.error("Error loading notes:", err));
+      .catch((err) => console.error("Error loading notes:", err));
   }, [user]);
 
   const fetchSessions = () => {
     if (!user) return;
     fetch(`http://localhost:5001/api/sessions?uid=${user.uid}`)
-      .then(res => res.json())
-      .then(data => setSessions(Array.isArray(data) ? data : []))
-      .catch(err => console.error("Error loading sessions:", err));
+      .then((res) => res.json())
+      .then((data) => setSessions(Array.isArray(data) ? data : []))
+      .catch((err) => console.error("Error loading sessions:", err));
   };
 
   useEffect(() => {
@@ -58,9 +61,9 @@ export default function ChatBox() {
 
   const loadSession = (session) => {
     const formatted = session.messages
-      .map(m => [
+      .map((m) => [
         { sender: "user", text: m.message },
-        { sender: "ai", text: m.reply }
+        { sender: "ai", text: m.reply },
       ])
       .flat();
 
@@ -70,11 +73,14 @@ export default function ChatBox() {
     if (session.note_url) setSelectedNote(session.note_url);
   };
 
+  // ======================================================
+  // 🚀 UPDATED SECTION — LOGGING ACTIVITY
+  // ======================================================
   const handleSend = async () => {
     if (!message.trim() || !selectedNote) return;
 
     const userMsg = message.trim();
-    setChat(prev => [...prev, { sender: "user", text: userMsg }]);
+    setChat((prev) => [...prev, { sender: "user", text: userMsg }]);
     setMessage("");
     setIsTyping(true);
 
@@ -87,21 +93,35 @@ export default function ChatBox() {
           note_url: selectedNote,
           userId: user?.uid,
           sessionId: currentSessionId,
-          conversationName
+          conversationName,
         }),
       });
 
       const data = await res.json();
-      setChat(prev => [...prev, { sender: "ai", text: data.reply }]);
+      setChat((prev) => [...prev, { sender: "ai", text: data.reply }]);
       setCurrentSessionId(data.sessionId);
       fetchSessions();
+
+      // ✅ ADD THIS — Log to Firestore
+      logActivity(
+  user.uid,
+  `Interacted with AI Chatbot: ${conversationName || "Unnamed Conversation"}`
+);
+
+      // ✅ Tell Profile screen to refresh instantly
+      window.dispatchEvent(new Event("activityLogged"));
+
     } catch (err) {
       console.error("Chat error:", err);
-      setChat(prev => [...prev, { sender: "ai", text: "Error: Could not connect to chatbot." }]);
+      setChat((prev) => [
+        ...prev,
+        { sender: "ai", text: "Error: Could not connect to chatbot." },
+      ]);
     } finally {
       setIsTyping(false);
     }
   };
+  // ======================================================
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -110,7 +130,6 @@ export default function ChatBox() {
     }
   };
 
-  // ✅ NEW FUNCTION TO DOWNLOAD PDF
   const downloadSessionAsPDF = (session) => {
     const doc = new jsPDF("p", "mm", "a4");
     let y = 10;
@@ -138,7 +157,6 @@ export default function ChatBox() {
 
   return (
     <div className="flex max-w-6xl mx-auto mt-10 gap-4">
-
       {/* Sidebar */}
       <div className="w-64 bg-gray-100 p-4 rounded-lg overflow-y-auto h-[600px]">
         <div className="font-bold mb-2">Previous Conversations</div>
@@ -151,14 +169,19 @@ export default function ChatBox() {
         </button>
 
         {sessions.map((s, i) => (
-          <div key={i} className="flex items-center justify-between p-2 bg-white rounded mb-1 border">
-
+          <div
+            key={i}
+            className="flex items-center justify-between p-2 bg-white rounded mb-1 border"
+          >
             <div className="cursor-pointer flex-1" onClick={() => loadSession(s)}>
-              <div className="text-xs text-gray-500">{s.createdAt?.split("T")[0]}</div>
-              <div className="font-semibold text-sm truncate">{s.name || s.summary}</div>
+              <div className="text-xs text-gray-500">
+                {s.createdAt?.split("T")[0]}
+              </div>
+              <div className="font-semibold text-sm truncate">
+                {s.name || s.summary}
+              </div>
             </div>
 
-            {/* ✅ NEW PDF BUTTON */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -172,7 +195,7 @@ export default function ChatBox() {
         ))}
       </div>
 
-      {/* Original chat UI remains unchanged below */}
+      {/* Chat UI */}
       <div className="flex-1 flex flex-col bg-white rounded-xl shadow-lg h-[600px]">
         {currentSessionId === null && (
           <div className="p-4 flex items-center gap-2 border-b">
@@ -191,10 +214,12 @@ export default function ChatBox() {
           <select
             className="border rounded-md p-2 flex-1"
             value={selectedNote}
-            onChange={e => setSelectedNote(e.target.value)}
+            onChange={(e) => setSelectedNote(e.target.value)}
           >
-            {notes.map(n => (
-              <option key={n.id} value={n.url}>{n.name}</option>
+            {notes.map((n) => (
+              <option key={n.id} value={n.url}>
+                {n.name}
+              </option>
             ))}
           </select>
         </div>
@@ -223,7 +248,7 @@ export default function ChatBox() {
         <div className="p-4 border-t flex gap-2">
           <input
             value={message}
-            onChange={e => setMessage(e.target.value)}
+            onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type your message..."
             className="flex-1 border rounded-lg p-2"
@@ -237,7 +262,6 @@ export default function ChatBox() {
           </button>
         </div>
       </div>
-
     </div>
   );
 }

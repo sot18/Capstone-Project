@@ -2,6 +2,8 @@
 import React from "react";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import ViewNotes from "../pages/ViewNotes";
+import axios from "axios";
+jest.mock("axios");
 
 // Mock Firebase modules
 jest.mock("firebase/auth", () => ({
@@ -100,6 +102,36 @@ test("deletes a note when delete button is clicked", async () => {
     expect(screen.queryByText(mockNotes[0].fileName)).not.toBeInTheDocument();
     expect(screen.getByText(mockNotes[1].fileName)).toBeInTheDocument(); // second note remains
   });
+});
+
+
+test("displays recent activity correctly", async () => {
+  const mockRecentActivity = [
+    { id: "1", action: "Uploaded Note 1", timestamp: "2025-11-29T10:00:00Z" },
+    { id: "2", action: "Deleted Note 2", timestamp: "2025-11-28T15:00:00Z" },
+  ];
+
+  // Mock API or Firestore call for recent activity
+  getDocs.mockResolvedValueOnce({
+    docs: mockRecentActivity.map((item) => ({
+      id: item.id,
+      data: () => ({ action: item.action, timestamp: item.timestamp }),
+    })),
+  });
+
+  onAuthStateChanged.mockImplementation((auth, callback) => {
+    callback({ uid: "123" });
+    return jest.fn();
+  });
+
+  render(<ViewNotes />);
+
+  // Wait for recent activity to render
+  for (const activity of mockRecentActivity) {
+    await waitFor(() => {
+      expect(screen.getByText(activity.action)).toBeInTheDocument();
+    });
+  }
 });
 
 

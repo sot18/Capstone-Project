@@ -35,4 +35,19 @@ describe("UploadNotes Component", () => {
     expect(screen.getByText(/Unsupported file type/i)).toBeInTheDocument();
   });
 
+  import axios from "axios";
+jest.mock("axios");
+
+test("displays total quizzes taken after API call", async () => {
+  // Mock API response
+  axios.get.mockResolvedValueOnce({ data: { totalQuizzesTaken: 3 } });
+
+  render(<Quiz />); // Make sure Quiz is imported
+
+  // Wait for the API call and component update
+  const totalQuizzes = await screen.findByText(/Total Quizzes Taken: 3/i);
+  expect(totalQuizzes).toBeInTheDocument();
+});
+
+
 });

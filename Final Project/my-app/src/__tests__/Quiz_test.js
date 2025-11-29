@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import Quiz from "../pages/Quiz";
 import { useAuth } from "../context/AuthContext";
 import axios from "axios";
+import { logActivity } from "../utils/logActivity";
 
 // Mock jsPDF and html2canvas so tests don't try to use browser APIs
 jest.mock("jspdf", () => {
@@ -10,6 +11,10 @@ jest.mock("jspdf", () => {
     save: jest.fn()
   }));
 });
+
+jest.mock("../utils/logActivity", () => ({
+  logActivity: jest.fn(() => Promise.resolve()),
+}));
 
 jest.mock("html2canvas", () => {
   return jest.fn().mockResolvedValue({
@@ -312,4 +317,49 @@ describe("Quiz Component", () => {
       expect(screen.getByText(/Failed to load quiz stats/i)).toBeInTheDocument();
     });
   });
+
+  test("submits quiz and logs completion activity", async () => {
+  // Mock notes and quiz generation
+  fetch
+    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "note1", name: "Note 1" }] }) // notes
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        quiz: {
+          id: "quiz1",
+          questions: [
+            { question: "Q1?", choices: ["A", "B"], correct_index: 0 },
+            { question: "Q2?", choices: ["C", "D"], correct_index: 1 },
+          ],
+        },
+      }),
+    });
+
+  render(<Quiz />);
+  await screen.findByText("Note 1");
+
+  fireEvent.change(screen.getByLabelText(/Select Notes/i), { target: { value: "note1" } });
+  fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+
+  // Wait for quiz to render
+  await screen.findByText(/Q1\?/i);
+
+  // Select answers
+  fireEvent.click(screen.getAllByLabelText(/^A\./i)[0]); // correct
+  fireEvent.click(screen.getAllByLabelText(/^C\./i)[0]); // correct
+
+  // Submit quiz
+  fireEvent.click(screen.getByRole("button", { name: /Submit Quiz/i }));
+
+  // Wait for result to appear
+  await waitFor(() => {
+    expect(screen.getByText(/Your Score:/i)).toBeInTheDocument();
+  });
+
+  // Ensure logActivity was called for completion
+  expect(logActivity).toHaveBeenCalledWith(
+    "test-uid",
+    expect.stringContaining("Completed quiz")
+  );
+});
 });
